@@ -711,6 +711,8 @@ fn sqlite_row_to_keyset(row: &SqliteRow) -> Result<KeySetInfo, Error> {
         id: Id::from_str(&row_id)?,
         unit: CurrencyUnit::from(row_unit),
         active,
+        // TODO: Get from db
+        input_fee_ppk: 0,
     })
 }
 

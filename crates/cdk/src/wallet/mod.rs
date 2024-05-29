@@ -67,6 +67,52 @@ impl Wallet {
         }
     }
 
+    /// Fee required for proof set
+    #[instrument(skip(self))]
+    pub async fn fees(&self, proofs: Proofs) -> Result<Amount, Error> {
+        //let mut sum_fee = 0;
+
+        //for proof in proofs {
+        //            let input_fee_ppk = self.localstore.get_mint_keyset().await?;
+        //}
+        todo!()
+    }
+
+    /// Total Balance of wallet for given unit
+    #[instrument(skip(self))]
+    pub async fn unit_balance(&self, unit: CurrencyUnit) -> Result<Amount, Error> {
+        let balance = match self
+            .localstore
+            .get_proofs(None, Some(unit), Some(vec![State::Unspent]), None)
+            .await?
+        {
+            Some(proofs) => proofs.iter().map(|p| p.proof.amount).sum(),
+            None => Amount::ZERO,
+        };
+
+        Ok(balance)
+    }
+
+    /// Total pending and reserved balance of wallet for given unit
+    #[instrument(skip(self))]
+    pub async fn pending_unit_balance(&self, unit: CurrencyUnit) -> Result<Amount, Error> {
+        let balance = match self
+            .localstore
+            .get_proofs(
+                None,
+                Some(unit),
+                Some(vec![State::Pending, State::Reserved]),
+                None,
+            )
+            .await?
+        {
+            Some(proofs) => proofs.iter().map(|p| p.proof.amount).sum(),
+            None => Amount::ZERO,
+        };
+
+        Ok(balance)
+    }
+
     /// Total Balance of wallet
     #[instrument(skip(self))]
     pub async fn total_balance(&self) -> Result<Amount, Error> {

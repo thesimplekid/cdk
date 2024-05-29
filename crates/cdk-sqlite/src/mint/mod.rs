@@ -667,6 +667,8 @@ fn sqlite_row_to_keyset_info(row: SqliteRow) -> Result<MintKeySetInfo, Error> {
         valid_to: row_valid_to.map(|v| v as u64),
         derivation_path: DerivationPath::from_str(&row_derivation_path).map_err(Error::from)?,
         max_order: row_max_order,
+        //TODO: DB migration
+        input_fee_ppk: 0,
     })
 }
 

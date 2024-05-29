@@ -45,6 +45,7 @@ impl Mint {
         localstore: Arc<dyn MintDatabase<Err = cdk_database::Error> + Send + Sync>,
         min_fee_reserve: Amount,
         percent_fee_reserve: f32,
+        input_fee_ppk: u64,
     ) -> Result<Self, Error> {
         let secp_ctx = Secp256k1::new();
         let xpriv =
@@ -67,8 +68,14 @@ impl Mint {
                 let derivation_path = DerivationPath::from(vec![
                     ChildNumber::from_hardened_idx(0).expect("0 is a valid index")
                 ]);
-                let (keyset, keyset_info) =
-                    create_new_keyset(&secp_ctx, xpriv, derivation_path, CurrencyUnit::Sat, 64);
+                let (keyset, keyset_info) = create_new_keyset(
+                    &secp_ctx,
+                    xpriv,
+                    derivation_path,
+                    CurrencyUnit::Sat,
+                    64,
+                    input_fee_ppk,
+                );
                 let id = keyset_info.id;
                 localstore.add_keyset_info(keyset_info).await?;
                 localstore.add_active_keyset(CurrencyUnit::Sat, id).await?;
@@ -262,6 +269,7 @@ impl Mint {
                 id: k.id,
                 unit: k.unit,
                 active: active_keysets.contains(&k.id),
+                input_fee_ppk: k.input_fee_ppk,
             })
             .collect();
 
@@ -283,6 +291,7 @@ impl Mint {
         unit: CurrencyUnit,
         derivation_path: DerivationPath,
         max_order: u8,
+        input_fee_ppk: u64,
     ) -> Result<(), Error> {
         let (keyset, keyset_info) = create_new_keyset(
             &self.secp_ctx,
@@ -290,6 +299,7 @@ impl Mint {
             derivation_path,
             unit.clone(),
             max_order,
+            input_fee_ppk,
         );
         let id = keyset_info.id;
         self.localstore.add_keyset_info(keyset_info).await?;
@@ -874,6 +884,8 @@ pub struct MintKeySetInfo {
     pub derivation_path: DerivationPath,
     /// Max order of keyset
     pub max_order: u8,
+    /// Input Fee ppk
+    pub input_fee_ppk: u64,
 }
 
 impl From<MintKeySetInfo> for KeySetInfo {
@@ -882,6 +894,7 @@ impl From<MintKeySetInfo> for KeySetInfo {
             id: keyset_info.id,
             unit: keyset_info.unit,
             active: keyset_info.active,
+            input_fee_ppk: keyset_info.input_fee_ppk,
         }
     }
 }
@@ -893,6 +906,7 @@ fn create_new_keyset<C: secp256k1::Signing>(
     derivation_path: DerivationPath,
     unit: CurrencyUnit,
     max_order: u8,
+    input_fee_ppk: u64,
 ) -> (MintKeySet, MintKeySetInfo) {
     let keyset = MintKeySet::generate(
         secp,
@@ -910,6 +924,7 @@ fn create_new_keyset<C: secp256k1::Signing>(
         valid_to: None,
         derivation_path,
         max_order,
+        input_fee_ppk,
     };
     (keyset, keyset_info)
 }
