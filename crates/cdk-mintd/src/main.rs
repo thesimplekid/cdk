@@ -44,7 +44,10 @@ async fn main() -> anyhow::Result<()> {
     let localstore: Arc<dyn MintDatabase<Err = cdk_database::Error> + Send + Sync> =
         match settings.database.engine {
             DatabaseEngine::Sqlite => {
-                Arc::new(MintSqliteDatabase::new(db_path.to_str().unwrap()).await?)
+                let sqlite_db = MintSqliteDatabase::new(db_path.to_str().unwrap()).await?;
+                sqlite_db.migrate().await;
+
+                Arc::new(sqlite_db)
             }
             DatabaseEngine::Redb => Arc::new(MintRedbDatabase::new(db_path.to_str().unwrap())?),
         };
