@@ -205,7 +205,15 @@ async fn get_melt_bolt11_quote(
     Json(payload): Json<MeltQuoteBolt11Request>,
 ) -> Result<Json<MeltQuoteBolt11Response>, Response> {
     let amount = match payload.unit {
-        CurrencyUnit::Sat | CurrencyUnit::Msat => Amount::from(
+        CurrencyUnit::Sat => Amount::from(
+            payload
+                .request
+                .amount_milli_satoshis()
+                .ok_or(Error::InvoiceAmountUndefined)
+                .map_err(into_response)?
+                / 1000,
+        ),
+        CurrencyUnit::Msat => Amount::from(
             payload
                 .request
                 .amount_milli_satoshis()
