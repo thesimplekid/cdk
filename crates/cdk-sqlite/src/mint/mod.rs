@@ -19,6 +19,7 @@ use error::Error;
 use lightning_invoice::Bolt11Invoice;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqliteRow};
 use sqlx::{ConnectOptions, Row};
+use tracing::instrument;
 
 pub mod error;
 
@@ -58,6 +59,7 @@ impl MintSqliteDatabase {
 impl MintDatabase for MintSqliteDatabase {
     type Err = cdk_database::Error;
 
+    #[instrument(skip(self))]
     async fn set_active_keyset(&self, unit: CurrencyUnit, id: Id) -> Result<(), Self::Err> {
         let mut transaction = self.pool.begin().await.map_err(Error::from)?;
         sqlx::query(
@@ -91,6 +93,7 @@ AND id IS ?;
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_active_keyset_id(&self, unit: &CurrencyUnit) -> Result<Option<Id>, Self::Err> {
         let rec = sqlx::query(
             r#"
@@ -117,6 +120,7 @@ AND unit IS ?
         ))
     }
 
+    #[instrument(skip_all)]
     async fn get_active_keysets(&self) -> Result<HashMap<CurrencyUnit, Id>, Self::Err> {
         let recs = sqlx::query(
             r#"
@@ -143,6 +147,7 @@ WHERE active = 1
         Ok(keysets)
     }
 
+    #[instrument(skip_all)]
     async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), Self::Err> {
         sqlx::query(
             r#"
@@ -165,6 +170,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
         Ok(())
     }
+
+    #[instrument(skip(self))]
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         let rec = sqlx::query(
             r#"
@@ -188,6 +195,7 @@ WHERE id=?;
         Ok(Some(sqlite_row_to_mint_quote(rec)?))
     }
 
+    #[instrument(skip_all)]
     async fn get_mint_quote_by_request(
         &self,
         request: &str,
@@ -214,6 +222,7 @@ WHERE request=?;
         Ok(Some(sqlite_row_to_mint_quote(rec)?))
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quote_by_request_lookup_id(
         &self,
         request_lookup_id: &str,
@@ -239,6 +248,8 @@ WHERE request_lookup_id=?;
 
         Ok(Some(sqlite_row_to_mint_quote(rec)?))
     }
+
+    #[instrument(skip(self))]
     async fn update_mint_quote_state(
         &self,
         quote_id: &str,
@@ -287,6 +298,7 @@ WHERE id=?;
         Ok(quote.state)
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
         let rec = sqlx::query(
             r#"
@@ -302,6 +314,8 @@ FROM mint_quote
 
         Ok(mint_quotes)
     }
+
+    #[instrument(skip(self))]
     async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         sqlx::query(
             r#"
@@ -317,6 +331,7 @@ WHERE id=?
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_melt_quote(&self, quote: mint::MeltQuote) -> Result<(), Self::Err> {
         sqlx::query(
             r#"
@@ -340,6 +355,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
         Ok(())
     }
+
+    #[instrument(skip(self))]
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<mint::MeltQuote>, Self::Err> {
         let rec = sqlx::query(
             r#"
@@ -362,6 +379,8 @@ WHERE id=?;
 
         Ok(Some(sqlite_row_to_melt_quote(rec)?))
     }
+
+    #[instrument(skip(self))]
     async fn get_melt_quotes(&self) -> Result<Vec<mint::MeltQuote>, Self::Err> {
         let rec = sqlx::query(
             r#"
@@ -378,6 +397,7 @@ FROM melt_quote
         Ok(melt_quotes)
     }
 
+    #[instrument(skip(self))]
     async fn update_melt_quote_state(
         &self,
         quote_id: &str,
@@ -415,6 +435,7 @@ WHERE id=?;
         Ok(quote.state)
     }
 
+    #[instrument(skip(self))]
     async fn remove_melt_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         sqlx::query(
             r#"
@@ -430,6 +451,7 @@ WHERE id=?
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_keyset_info(&self, keyset: MintKeySetInfo) -> Result<(), Self::Err> {
         sqlx::query(
             r#"
@@ -453,6 +475,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
         Ok(())
     }
+
+    #[instrument(skip(self))]
     async fn get_keyset_info(&self, id: &Id) -> Result<Option<MintKeySetInfo>, Self::Err> {
         let rec = sqlx::query(
             r#"
@@ -475,6 +499,8 @@ WHERE id=?;
 
         Ok(Some(sqlite_row_to_keyset_info(rec)?))
     }
+
+    #[instrument(skip(self))]
     async fn get_keyset_infos(&self) -> Result<Vec<MintKeySetInfo>, Self::Err> {
         let recs = sqlx::query(
             r#"
@@ -492,6 +518,7 @@ FROM keyset;
             .collect())
     }
 
+    #[instrument(skip_all)]
     async fn add_proofs(&self, proofs: Proofs) -> Result<(), Self::Err> {
         let mut transaction = self.pool.begin().await.map_err(Error::from)?;
         for proof in proofs {
@@ -520,6 +547,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 
         Ok(())
     }
+
+    #[instrument(skip_all)]
     async fn get_proofs_by_ys(&self, ys: &[PublicKey]) -> Result<Vec<Option<Proof>>, Self::Err> {
         let mut transaction = self.pool.begin().await.map_err(Error::from)?;
 
@@ -551,6 +580,7 @@ WHERE y=?;
         Ok(proofs)
     }
 
+    #[instrument(skip_all)]
     async fn get_proofs_states(&self, ys: &[PublicKey]) -> Result<Vec<Option<State>>, Self::Err> {
         let mut transaction = self.pool.begin().await.map_err(Error::from)?;
 
@@ -584,6 +614,7 @@ WHERE y=?;
         Ok(states)
     }
 
+    #[instrument(skip(self, ys))]
     async fn update_proofs_states(
         &self,
         ys: &[PublicKey],
@@ -641,6 +672,8 @@ WHERE y=?;
 
         Ok(states)
     }
+
+    #[instrument(skip_all)]
     async fn add_blind_signatures(
         &self,
         blinded_messages: &[PublicKey],
@@ -668,6 +701,8 @@ VALUES (?, ?, ?, ?);
 
         Ok(())
     }
+
+    #[instrument(skip_all)]
     async fn get_blinded_signatures(
         &self,
         blinded_messages: &[PublicKey],
@@ -697,6 +732,7 @@ WHERE y=?;
         Ok(signatures)
     }
 
+    #[instrument(skip(self))]
     async fn get_blinded_signatures_for_keyset(
         &self,
         keyset_id: &Id,

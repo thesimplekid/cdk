@@ -18,6 +18,7 @@ use cdk::{cdk_database, mint};
 use migrations::migrate_01_to_02;
 use redb::{Database, ReadableTable, TableDefinition};
 use tokio::sync::Mutex;
+use tracing::instrument;
 
 use super::error::Error;
 use crate::migrations::migrate_00_to_01;
@@ -147,6 +148,7 @@ impl MintRedbDatabase {
 impl MintDatabase for MintRedbDatabase {
     type Err = cdk_database::Error;
 
+    #[instrument(skip(self))]
     async fn set_active_keyset(&self, unit: CurrencyUnit, id: Id) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -165,6 +167,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_active_keyset_id(&self, unit: &CurrencyUnit) -> Result<Option<Id>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -179,6 +182,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(None)
     }
 
+    #[instrument(skip(self))]
     async fn get_active_keysets(&self) -> Result<HashMap<CurrencyUnit, Id>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -198,6 +202,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(active_keysets)
     }
 
+    #[instrument(skip_all)]
     async fn add_keyset_info(&self, keyset: MintKeySetInfo) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -219,6 +224,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_keyset_info(&self, keyset_id: &Id) -> Result<Option<MintKeySetInfo>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -233,6 +239,7 @@ impl MintDatabase for MintRedbDatabase {
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_keyset_infos(&self) -> Result<Vec<MintKeySetInfo>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -249,6 +256,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(keysets)
     }
 
+    #[instrument(skip_all)]
     async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -270,6 +278,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -283,6 +292,7 @@ impl MintDatabase for MintRedbDatabase {
         }
     }
 
+    #[instrument(skip_all)]
     async fn update_mint_quote_state(
         &self,
         quote_id: &str,
@@ -340,6 +350,8 @@ impl MintDatabase for MintRedbDatabase {
 
         Ok(current_state)
     }
+
+    #[instrument(skip_all)]
     async fn get_mint_quote_by_request(
         &self,
         request: &str,
@@ -356,6 +368,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(quote)
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quote_by_request_lookup_id(
         &self,
         request_lookup_id: &str,
@@ -372,6 +385,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(quote)
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -390,6 +404,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(quotes)
     }
 
+    #[instrument(skip(self))]
     async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -406,6 +421,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_melt_quote(&self, quote: mint::MeltQuote) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -427,6 +443,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<mint::MeltQuote>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -439,6 +456,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(quote.map(|q| serde_json::from_str(q.value()).unwrap()))
     }
 
+    #[instrument(skip(self))]
     async fn update_melt_quote_state(
         &self,
         quote_id: &str,
@@ -485,6 +503,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(current_state)
     }
 
+    #[instrument(skip(self))]
     async fn get_melt_quotes(&self) -> Result<Vec<mint::MeltQuote>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -503,6 +522,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(quotes)
     }
 
+    #[instrument(skip(self))]
     async fn remove_melt_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -519,6 +539,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_proofs(&self, proofs: Proofs) -> Result<(), Self::Err> {
         let db = self.db.lock().await;
 
@@ -543,6 +564,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn get_proofs_by_ys(&self, ys: &[PublicKey]) -> Result<Vec<Option<Proof>>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -562,6 +584,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(proofs)
     }
 
+    #[instrument(skip_all)]
     async fn get_proofs_states(&self, ys: &[PublicKey]) -> Result<Vec<Option<State>>, Self::Err> {
         let db = self.db.lock().await;
         let read_txn = db.begin_read().map_err(Error::from)?;
@@ -583,6 +606,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(states)
     }
 
+    #[instrument(skip_all)]
     async fn update_proofs_states(
         &self,
         ys: &[PublicKey],
@@ -627,6 +651,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(states)
     }
 
+    #[instrument(skip_all)]
     async fn add_blind_signatures(
         &self,
         blinded_messages: &[PublicKey],
@@ -658,6 +683,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn get_blinded_signatures(
         &self,
         blinded_messages: &[PublicKey],
@@ -682,6 +708,7 @@ impl MintDatabase for MintRedbDatabase {
         Ok(signatures)
     }
 
+    #[instrument(skip_all)]
     async fn get_blinded_signatures_for_keyset(
         &self,
         keyset_id: &Id,

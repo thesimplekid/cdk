@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::{Mutex, RwLock};
+use tracing::instrument;
 
 use super::{Error, MintDatabase};
 use crate::dhke::hash_to_curve;
@@ -76,32 +77,39 @@ impl MintMemoryDatabase {
 impl MintDatabase for MintMemoryDatabase {
     type Err = Error;
 
+    #[instrument(skip(self))]
     async fn set_active_keyset(&self, unit: CurrencyUnit, id: Id) -> Result<(), Self::Err> {
         self.active_keysets.write().await.insert(unit, id);
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_active_keyset_id(&self, unit: &CurrencyUnit) -> Result<Option<Id>, Self::Err> {
         Ok(self.active_keysets.read().await.get(unit).cloned())
     }
 
+    #[instrument(skip_all)]
     async fn get_active_keysets(&self) -> Result<HashMap<CurrencyUnit, Id>, Self::Err> {
         Ok(self.active_keysets.read().await.clone())
     }
 
+    #[instrument(skip(self))]
     async fn add_keyset_info(&self, keyset: MintKeySetInfo) -> Result<(), Self::Err> {
         self.keysets.write().await.insert(keyset.id, keyset);
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_keyset_info(&self, keyset_id: &Id) -> Result<Option<MintKeySetInfo>, Self::Err> {
         Ok(self.keysets.read().await.get(keyset_id).cloned())
     }
 
+    #[instrument(skip(self))]
     async fn get_keyset_infos(&self) -> Result<Vec<MintKeySetInfo>, Self::Err> {
         Ok(self.keysets.read().await.values().cloned().collect())
     }
 
+    #[instrument(skip_all)]
     async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), Self::Err> {
         self.mint_quotes
             .write()
@@ -110,10 +118,12 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         Ok(self.mint_quotes.read().await.get(quote_id).cloned())
     }
 
+    #[instrument(skip(self))]
     async fn update_mint_quote_state(
         &self,
         quote_id: &str,
@@ -144,6 +154,7 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(current_state)
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quote_by_request_lookup_id(
         &self,
         request: &str,
@@ -159,6 +170,8 @@ impl MintDatabase for MintMemoryDatabase {
 
         Ok(quote)
     }
+
+    #[instrument(skip(self))]
     async fn get_mint_quote_by_request(
         &self,
         request: &str,
@@ -175,16 +188,19 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(quote)
     }
 
+    #[instrument(skip(self))]
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
         Ok(self.mint_quotes.read().await.values().cloned().collect())
     }
 
+    #[instrument(skip(self))]
     async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         self.mint_quotes.write().await.remove(quote_id);
 
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_melt_quote(&self, quote: mint::MeltQuote) -> Result<(), Self::Err> {
         self.melt_quotes
             .write()
@@ -193,10 +209,12 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<mint::MeltQuote>, Self::Err> {
         Ok(self.melt_quotes.read().await.get(quote_id).cloned())
     }
 
+    #[instrument(skip(self))]
     async fn update_melt_quote_state(
         &self,
         quote_id: &str,
@@ -218,16 +236,19 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(current_state)
     }
 
+    #[instrument(skip(self))]
     async fn get_melt_quotes(&self) -> Result<Vec<mint::MeltQuote>, Self::Err> {
         Ok(self.melt_quotes.read().await.values().cloned().collect())
     }
 
+    #[instrument(skip(self))]
     async fn remove_melt_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
         self.melt_quotes.write().await.remove(quote_id);
 
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn add_proofs(&self, proofs: Proofs) -> Result<(), Self::Err> {
         let mut db_proofs = self.proofs.write().await;
 
@@ -252,6 +273,7 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(proofs)
     }
 
+    #[instrument(skip(self, ys))]
     async fn update_proofs_states(
         &self,
         ys: &[PublicKey],
@@ -269,6 +291,7 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(states)
     }
 
+    #[instrument(skip_all)]
     async fn get_proofs_states(&self, ys: &[PublicKey]) -> Result<Vec<Option<State>>, Self::Err> {
         let proofs_states = self.proof_state.lock().await;
 
@@ -282,6 +305,7 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(states)
     }
 
+    #[instrument(skip_all)]
     async fn add_blind_signatures(
         &self,
         blinded_message: &[PublicKey],
@@ -296,6 +320,7 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn get_blinded_signatures(
         &self,
         blinded_messages: &[PublicKey],
@@ -313,6 +338,7 @@ impl MintDatabase for MintMemoryDatabase {
         Ok(signatures)
     }
 
+    #[instrument(skip(self))]
     async fn get_blinded_signatures_for_keyset(
         &self,
         keyset_id: &Id,
