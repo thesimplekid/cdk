@@ -310,22 +310,33 @@ impl MintDatabase for MintRedbDatabase {
         let current_state = mint_quote.state;
         mint_quote.state = state;
 
-        let write_txn = db.begin_write().map_err(Error::from)?;
-        {
-            let mut table = write_txn
-                .open_table(MINT_QUOTES_TABLE)
-                .map_err(Error::from)?;
+        // Once a mint quote is issed the quote state should not be updated
+        match current_state == MintQuoteState::Issued {
+            false => {
+                let write_txn = db.begin_write().map_err(Error::from)?;
+                {
+                    let mut table = write_txn
+                        .open_table(MINT_QUOTES_TABLE)
+                        .map_err(Error::from)?;
 
-            table
-                .insert(
-                    quote_id,
-                    serde_json::to_string(&mint_quote)
-                        .map_err(Error::from)?
-                        .as_str(),
-                )
-                .map_err(Error::from)?;
+                    table
+                        .insert(
+                            quote_id,
+                            serde_json::to_string(&mint_quote)
+                                .map_err(Error::from)?
+                                .as_str(),
+                        )
+                        .map_err(Error::from)?;
+                }
+                write_txn.commit().map_err(Error::from)?;
+            }
+            true => {
+                tracing::warn!(
+                    "Attempting to update state of issued mint quote state to {}",
+                    current_state
+                );
+            }
         }
-        write_txn.commit().map_err(Error::from)?;
 
         Ok(current_state)
     }

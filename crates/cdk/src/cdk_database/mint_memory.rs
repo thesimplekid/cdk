@@ -128,9 +128,18 @@ impl MintDatabase for MintMemoryDatabase {
 
         let current_state = quote.state;
 
-        quote.state = state;
-
-        mint_quotes.insert(quote_id.to_string(), quote.clone());
+        match current_state == MintQuoteState::Issued {
+            false => {
+                quote.state = state;
+                mint_quotes.insert(quote_id.to_string(), quote.clone());
+            }
+            true => {
+                tracing::warn!(
+                    "Attempting to update state of issued mint quote state to {}",
+                    current_state
+                );
+            }
+        }
 
         Ok(current_state)
     }

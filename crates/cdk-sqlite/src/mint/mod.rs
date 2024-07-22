@@ -260,18 +260,29 @@ WHERE id=?;
 
         let quote = sqlite_row_to_mint_quote(rec)?;
 
-        sqlx::query(
-            r#"
+        // Once a mint quote is issed the quote state should not be updated
+        match quote.state == MintQuoteState::Issued {
+            false => {
+                sqlx::query(
+                    r#"
         UPDATE mint_quote SET state = ? WHERE id = ?
         "#,
-        )
-        .bind(state.to_string())
-        .bind(quote_id)
-        .execute(&mut transaction)
-        .await
-        .map_err(Error::from)?;
+                )
+                .bind(state.to_string())
+                .bind(quote_id)
+                .execute(&mut transaction)
+                .await
+                .map_err(Error::from)?;
 
-        transaction.commit().await.map_err(Error::from)?;
+                transaction.commit().await.map_err(Error::from)?;
+            }
+            true => {
+                tracing::warn!(
+                    "Attempting to update state of issued mint quote state to {}",
+                    quote.state
+                );
+            }
+        }
 
         Ok(quote.state)
     }
