@@ -36,7 +36,7 @@ jobs:
             -p cdk-cln,
             -p cdk-fake-wallet,
             -p cdk-strike,
-            -p cdk-integration-tests
+            -p cdk-integration-tests,
             --bin cdk-cli,
             --bin cdk-mintd,
             --examples
