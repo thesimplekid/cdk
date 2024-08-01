@@ -23,7 +23,7 @@ if [ "$is_msrv" == true ]; then
 fi
 
 buildargs=(
-    "-p cdk-integration-test"
+    "-p cdk-integration-tests"
     "-p cdk"
     "-p cdk --no-default-features"
     "-p cdk --no-default-features --features wallet"

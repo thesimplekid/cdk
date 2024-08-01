@@ -21,17 +21,17 @@ pub const MINT_URL: &str = "http://127.0.0.1:8088";
 const LISTEN_ADDR: &str = "127.0.0.1";
 const LISTEN_PORT: u16 = 8088;
 
-pub async fn start_mint() -> Result<()> {
+pub fn create_backends_fake_wallet(
+) -> HashMap<LnKey, Arc<dyn MintLightning<Err = cdk::cdk_lightning::Error> + Sync + Send>> {
+    let fee_reserve = FeeReserve {
+        min_fee_reserve: 1.into(),
+        percent_fee_reserve: 1.0,
+    };
     let mut ln_backends: HashMap<
         LnKey,
         Arc<dyn MintLightning<Err = cdk::cdk_lightning::Error> + Sync + Send>,
     > = HashMap::new();
     let ln_key = LnKey::new(CurrencyUnit::Sat, PaymentMethod::Bolt11);
-
-    let fee_reserve = FeeReserve {
-        min_fee_reserve: 1.into(),
-        percent_fee_reserve: 1.0,
-    };
 
     let wallet = Arc::new(FakeWallet::new(
         fee_reserve.clone(),
@@ -41,6 +41,15 @@ pub async fn start_mint() -> Result<()> {
 
     ln_backends.insert(ln_key, wallet.clone());
 
+    ln_backends
+}
+
+pub async fn start_mint(
+    ln_backends: HashMap<
+        LnKey,
+        Arc<dyn MintLightning<Err = cdk::cdk_lightning::Error> + Sync + Send>,
+    >,
+) -> Result<()> {
     let nuts = Nuts::new()
         .nut07(true)
         .nut08(true)
@@ -83,24 +92,29 @@ pub async fn start_mint() -> Result<()> {
         .layer(CorsLayer::permissive());
 
     let mint = Arc::clone(&mint_arc);
-    let wallet_clone = Arc::clone(&wallet);
-    tokio::spawn(async move {
-        match wallet_clone.wait_any_invoice().await {
-            Ok(mut stream) => {
-                while let Some(request_lookup_id) = stream.next().await {
-                    if let Err(err) = handle_paid_invoice(mint.clone(), &request_lookup_id).await {
-                        // nosemgrep: direct-panic
-                        panic!("{:?}", err);
+
+    for wallet in ln_backends.values() {
+        let wallet_clone = Arc::clone(wallet);
+        let mint = Arc::clone(&mint);
+        tokio::spawn(async move {
+            match wallet_clone.wait_any_invoice().await {
+                Ok(mut stream) => {
+                    while let Some(request_lookup_id) = stream.next().await {
+                        if let Err(err) =
+                            handle_paid_invoice(Arc::clone(&mint), &request_lookup_id).await
+                        {
+                            // nosemgrep: direct-panic
+                            panic!("{:?}", err);
+                        }
                     }
                 }
+                Err(err) => {
+                    // nosemgrep: direct-panic
+                    panic!("Could not get invoice stream: {}", err);
+                }
             }
-            Err(err) => {
-                // nosemgrep: direct-panic
-                panic!("Could not get invoice stream: {}", err);
-            }
-        }
-    });
-
+        });
+    }
     let listener =
         tokio::net::TcpListener::bind(format!("{}:{}", LISTEN_ADDR, LISTEN_PORT)).await?;
 
