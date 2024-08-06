@@ -44,7 +44,7 @@ pub struct Cln {
 }
 
 impl Cln {
-    /// Create new ['Cln]
+    /// Create new [`Cln`]
     pub async fn new(
         rpc_socket: PathBuf,
         fee_reserve: FeeReserve,
