@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use axum::Router;
 use bip39::Mnemonic;
 use cdk::cdk_database::{self, MintDatabase};
@@ -22,6 +22,7 @@ use cdk::nuts::{
 use cdk_axum::LnKey;
 use cdk_cln::Cln;
 use cdk_fake_wallet::FakeWallet;
+use cdk_phoenixd::Phoenixd;
 use cdk_redb::MintRedbDatabase;
 use cdk_sqlite::MintSqliteDatabase;
 use cdk_strike::Strike;
@@ -82,8 +83,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut contact_info: Option<Vec<ContactInfo>> = None;
 
-    if let Some(nostr_contact) = settings.mint_info.contact_nostr_public_key {
-        let nostr_contact = ContactInfo::new("nostr".to_string(), nostr_contact);
+    if let Some(nostr_contact) = &settings.mint_info.contact_nostr_public_key {
+        let nostr_contact = ContactInfo::new("nostr".to_string(), nostr_contact.to_string());
 
         contact_info = match contact_info {
             Some(mut vec) => {
@@ -94,8 +95,8 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
-    if let Some(email_contact) = settings.mint_info.contact_email {
-        let email_contact = ContactInfo::new("email".to_string(), email_contact);
+    if let Some(email_contact) = &settings.mint_info.contact_email {
+        let email_contact = ContactInfo::new("email".to_string(), email_contact.to_string());
 
         contact_info = match contact_info {
             Some(mut vec) => {
@@ -193,6 +194,53 @@ async fn main() -> anyhow::Result<()> {
             }
 
             routers
+        }
+        LnBackend::Phoenixd => {
+            let api_password = settings
+                .clone()
+                .phoenixd
+                .expect("Checked at config load")
+                .api_password;
+
+            let api_url = settings
+                .clone()
+                .phoenixd
+                .expect("Checked at config load")
+                .api_url;
+            if fee_reserve.percent_fee_reserve < 2.0 {
+                bail!("Fee reserve is too low");
+            }
+
+            let webhook_endpoint = "/webhook/phoenixd";
+
+            let webhook_url = format!("{}{}", settings.info.url, webhook_endpoint);
+
+            let (sender, receiver) = tokio::sync::mpsc::channel(8);
+
+            let phoenixd = Phoenixd::new(
+                api_password.to_string(),
+                api_url.to_string(),
+                MintMeltSettings::default(),
+                MintMeltSettings::default(),
+                fee_reserve,
+                Arc::new(Mutex::new(Some(receiver))),
+                webhook_url,
+            )?;
+
+            let router = phoenixd
+                .create_invoice_webhook(webhook_endpoint, sender)
+                .await?;
+
+            supported_units.insert(CurrencyUnit::Sat, (input_fee_ppk, 64));
+            ln_backends.insert(
+                LnKey {
+                    unit: CurrencyUnit::Sat,
+                    method: PaymentMethod::Bolt11,
+                },
+                Arc::new(phoenixd),
+            );
+
+            vec![router]
         }
         LnBackend::FakeWallet => {
             let units = settings.fake_wallet.unwrap_or_default().supported_units;

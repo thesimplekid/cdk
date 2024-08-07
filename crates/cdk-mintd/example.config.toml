@@ -36,3 +36,7 @@ ln_backend = "cln"
 # api_key=""
 # Optional default sats
 # supported_units=[""]
+
+# [phoenixd]
+# api_password = ""
+# api_url = ""

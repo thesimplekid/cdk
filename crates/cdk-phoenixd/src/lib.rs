@@ -36,8 +36,8 @@ pub struct Phoenixd {
 }
 
 impl Phoenixd {
-    /// Create new [`Strike`] wallet
-    pub async fn new(
+    /// Create new [`Phoenixd`] wallet
+    pub fn new(
         api_password: String,
         api_url: String,
         mint_settings: MintMeltSettings,
@@ -55,6 +55,17 @@ impl Phoenixd {
             receiver,
             webhook_url,
         })
+    }
+
+    /// Create invoice webhook
+    pub async fn create_invoice_webhook(
+        &self,
+        webhook_endpoint: &str,
+        sender: tokio::sync::mpsc::Sender<WebhookResponse>,
+    ) -> anyhow::Result<Router> {
+        self.phoenixd_api
+            .create_invoice_webhook_router(webhook_endpoint, sender)
+            .await
     }
 }
 
@@ -193,18 +204,5 @@ impl MintLightning for Phoenixd {
         };
 
         Ok(state)
-    }
-}
-
-impl Phoenixd {
-    /// Create invoice webhook
-    pub async fn create_invoice_webhook(
-        &self,
-        webhook_endpoint: &str,
-        sender: tokio::sync::mpsc::Sender<WebhookResponse>,
-    ) -> anyhow::Result<Router> {
-        self.phoenixd_api
-            .create_invoice_webhook_router(webhook_endpoint, sender)
-            .await
     }
 }

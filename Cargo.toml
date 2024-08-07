@@ -34,6 +34,7 @@ cdk-cln = { version = "0.1", path = "./crates/cdk-cln", default-features = false
 cdk-axum = { version = "0.1", path = "./crates/cdk-axum", default-features = false }
 cdk-fake-wallet = { version = "0.1", path = "./crates/cdk-fake-wallet", default-features = false }
 cdk-strike = { version = "0.1", path = "./crates/cdk-strike", default-features = false }
+cdk-phoenixd = { version = "0.1", path = "./crates/cdk-phoenixd", default-features = false }
 clap = { version = "4.4.8", features = ["derive", "env", "default"] }
 tokio = { version = "1", default-features = false }
 thiserror = "1"

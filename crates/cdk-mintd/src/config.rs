@@ -22,8 +22,7 @@ pub enum LnBackend {
     Cln,
     Strike,
     FakeWallet,
-    //  Greenlight,
-    //  Ldk,
+    Phoenixd,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -43,6 +42,12 @@ pub struct Strike {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Cln {
     pub rpc_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Phoenixd {
+    pub api_password: String,
+    pub api_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +83,7 @@ pub struct Settings {
     pub ln: Ln,
     pub cln: Option<Cln>,
     pub strike: Option<Strike>,
+    pub phoenixd: Option<Phoenixd>,
     pub fake_wallet: Option<FakeWallet>,
     pub database: Database,
 }
@@ -141,6 +147,7 @@ impl Settings {
             LnBackend::Cln => assert!(settings.cln.is_some()),
             LnBackend::FakeWallet => (),
             LnBackend::Strike => assert!(settings.strike.is_some()),
+            LnBackend::Phoenixd => assert!(settings.phoenixd.is_some()),
         }
 
         Ok(settings)
