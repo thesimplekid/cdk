@@ -306,7 +306,7 @@ impl MintLightning for Strike {
         &self,
         _melt_quote_request: &MeltQuoteBolt12Request,
     ) -> Result<Bolt12PaymentQuoteResponse, Self::Err> {
-        todo!()
+        Err(Error::UnsupportedMethod.into())
     }
 
     async fn pay_bolt12_offer(
@@ -315,7 +315,7 @@ impl MintLightning for Strike {
         _amount: Option<Amount>,
         _max_fee_amount: Option<Amount>,
     ) -> Result<PayInvoiceResponse, Self::Err> {
-        todo!()
+        Err(Error::UnsupportedMethod.into())
     }
 
     /// Create bolt12 offer
@@ -326,7 +326,7 @@ impl MintLightning for Strike {
         _description: String,
         _unix_expiry: u64,
     ) -> Result<CreateOfferResponse, Self::Err> {
-        todo!()
+        Err(Error::UnsupportedMethod.into())
     }
 }
 

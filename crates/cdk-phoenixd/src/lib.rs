@@ -416,6 +416,6 @@ impl MintLightning for Phoenixd {
         _description: String,
         _unix_expiry: u64,
     ) -> Result<CreateOfferResponse, Self::Err> {
-        todo!()
+        Err(Error::UnsupportedMethod.into())
     }
 }
