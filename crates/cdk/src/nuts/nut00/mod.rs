@@ -348,6 +348,8 @@ pub enum CurrencyUnit {
     Usd,
     /// Euro
     Eur,
+    /// Search
+    Search,
 }
 
 #[cfg(feature = "mint")]
@@ -359,6 +361,7 @@ impl CurrencyUnit {
             Self::Msat => 1,
             Self::Usd => 2,
             Self::Eur => 3,
+            Self::Search => 4,
         }
     }
 }
@@ -371,6 +374,7 @@ impl FromStr for CurrencyUnit {
             "msat" => Ok(Self::Msat),
             "usd" => Ok(Self::Usd),
             "eur" => Ok(Self::Eur),
+            "search" => Ok(Self::Search),
             _ => Err(Error::UnsupportedUnit),
         }
     }
@@ -383,6 +387,7 @@ impl fmt::Display for CurrencyUnit {
             CurrencyUnit::Msat => "msat",
             CurrencyUnit::Usd => "usd",
             CurrencyUnit::Eur => "eur",
+            CurrencyUnit::Search => "search",
         };
         if let Some(width) = f.width() {
             write!(f, "{:width$}", s, width = width)

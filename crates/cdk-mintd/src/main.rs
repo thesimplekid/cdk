@@ -161,8 +161,8 @@ async fn main() -> anyhow::Result<()> {
                 .await?,
             );
 
-            ln_backends.insert(LnKey::new(CurrencyUnit::Sat, PaymentMethod::Bolt11), cln);
-            supported_units.insert(CurrencyUnit::Sat, (input_fee_ppk, 64));
+            ln_backends.insert(LnKey::new(CurrencyUnit::Search, PaymentMethod::Bolt11), cln);
+            supported_units.insert(CurrencyUnit::Search, (input_fee_ppk, 1));
             vec![]
         }
         LnBackend::Strike => {

@@ -33,6 +33,7 @@ use cln_rpc::model::Request;
 use cln_rpc::primitives::{Amount as CLN_Amount, AmountOrAny};
 use error::Error;
 use futures::{Stream, StreamExt};
+use serde::Deserialize;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -341,7 +342,15 @@ impl MintLightning for Cln {
 
         let label = Uuid::new_v4().to_string();
 
-        let amount = to_unit(amount, unit, &CurrencyUnit::Msat)?;
+        let amount = match unit {
+            CurrencyUnit::Search => {
+                let usd_price = get_usd_price().await.unwrap();
+                let msats = cents_to_msats(3, usd_price)?;
+                msats.into()
+            }
+            _ => to_unit(amount, unit, &CurrencyUnit::Msat)?,
+        };
+
         let amount_msat = AmountOrAny::Amount(CLN_Amount::from_msat(amount.into()));
 
         let cln_response = cln_client
@@ -465,6 +474,42 @@ impl MintLightning for Cln {
             }
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+struct PriceResponse {
+    time: u64,
+    usd: u64,
+    eur: u64,
+    gbp: u64,
+    cad: u64,
+    chf: u64,
+    aud: u64,
+    jpy: u64,
+}
+
+async fn get_usd_price() -> Result<u64, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://mempool.space/api/v1/prices")
+        .send()
+        .await?
+        .json::<PriceResponse>()
+        .await?;
+
+    Ok(response.usd)
+}
+
+fn cents_to_msats(cents: u64, btc_price: u64) -> Result<u64, Error> {
+    // price_data.USD is price in cents
+    // 1 BTC = 100_000_000_000 msats
+    // 1 BTC = price_data.USD cents
+
+    // Formula: (cents * 100_000_000_000) / price_data.USD
+    let msats = (cents as u128 * 100_000_000_000u128) / btc_price as u128;
+
+    Ok(msats as u64)
 }
 
 impl Cln {

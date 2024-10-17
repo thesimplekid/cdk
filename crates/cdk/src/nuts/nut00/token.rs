@@ -190,7 +190,8 @@ impl TokenV3 {
         })
     }
 
-    fn proofs(&self) -> HashMap<MintUrl, Proofs> {
+    /// Proofs
+    pub fn proofs(&self) -> HashMap<MintUrl, Proofs> {
         let mut proofs: HashMap<MintUrl, Proofs> = HashMap::new();
 
         for token in self.token.clone() {
@@ -207,7 +208,8 @@ impl TokenV3 {
     }
 
     #[inline]
-    fn value(&self) -> Result<Amount, Error> {
+    /// Value
+    pub fn value(&self) -> Result<Amount, Error> {
         Ok(Amount::try_sum(
             self.token
                 .iter()
@@ -217,12 +219,14 @@ impl TokenV3 {
     }
 
     #[inline]
-    fn memo(&self) -> &Option<String> {
+    /// Memo
+    pub fn memo(&self) -> &Option<String> {
         &self.memo
     }
 
     #[inline]
-    fn unit(&self) -> &Option<CurrencyUnit> {
+    /// Unit
+    pub fn unit(&self) -> &Option<CurrencyUnit> {
         &self.unit
     }
 }
@@ -306,8 +310,9 @@ impl TokenV4 {
         proofs
     }
 
+    /// Value
     #[inline]
-    fn value(&self) -> Result<Amount, Error> {
+    pub fn value(&self) -> Result<Amount, Error> {
         Ok(Amount::try_sum(
             self.token
                 .iter()
@@ -316,13 +321,15 @@ impl TokenV4 {
         )?)
     }
 
+    /// Memo
     #[inline]
-    fn memo(&self) -> &Option<String> {
+    pub fn memo(&self) -> &Option<String> {
         &self.memo
     }
 
+    /// Unit
     #[inline]
-    fn unit(&self) -> &Option<CurrencyUnit> {
+    pub fn unit(&self) -> &Option<CurrencyUnit> {
         &self.unit
     }
 }

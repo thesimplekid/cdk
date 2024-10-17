@@ -158,12 +158,6 @@
             stable = pkgs.mkShell ({
               shellHook = ''
                 ${_shellHook}
-                export CC="${pkgs.clang-tools.clang}/bin/clang"
-                export AR="${pkgs.llvm}/bin/llvm-ar"
-                export C_INCLUDE_PATH="${pkgs.llvmPackages_15.libclang.lib}/lib/clang/${pkgs.llvmPackages_15.libclang.version}/include"
-                export LIBCLANG_PATH=
-                export CXX="${pkgs.clang-tools_15.clang}/bin/clang++"
-                export CFLAGS="-mcpu=generic"
               '';
               buildInputs = buildInputs ++ WASMInputs ++ [ stable_toolchain ];
               inherit nativeBuildInputs;
