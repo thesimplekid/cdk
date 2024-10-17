@@ -495,13 +495,15 @@ async fn get_usd_price() -> Result<u64, Box<dyn std::error::Error>> {
     Ok(response.usd)
 }
 
-fn cents_to_msats(cents: u64, btc_price: u64) -> Result<u64, Error> {
+fn cents_to_msats(cents: u64, btc_price_dollars: u64) -> Result<u64, Error> {
     // price_data.USD is price in cents
     // 1 BTC = 100_000_000_000 msats
     // 1 BTC = price_data.USD cents
 
+    let bitcoin_price_cents = btc_price_dollars * 100;
+
     // Formula: (cents * 100_000_000_000) / price_data.USD
-    let msats = (cents as u128 * 100_000_000u128) / btc_price as u128;
+    let msats = (cents as u128 * 100_000_000_000u128) / bitcoin_price_cents as u128;
 
     Ok(msats as u64)
 }
