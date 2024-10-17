@@ -477,16 +477,10 @@ impl MintLightning for Cln {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
 struct PriceResponse {
     time: u64,
+    #[serde(rename = "USD")]
     usd: u64,
-    eur: u64,
-    gbp: u64,
-    cad: u64,
-    chf: u64,
-    aud: u64,
-    jpy: u64,
 }
 
 async fn get_usd_price() -> Result<u64, Box<dyn std::error::Error>> {
