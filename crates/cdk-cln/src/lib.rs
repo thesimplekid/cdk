@@ -345,7 +345,7 @@ impl MintLightning for Cln {
         let amount = match unit {
             CurrencyUnit::Search => {
                 let usd_price = get_usd_price().await.unwrap();
-                let msats = cents_to_msats(3, usd_price)?;
+                let msats = cents_to_msats(3 * u64::from(amount), usd_price)?;
                 msats.into()
             }
             _ => to_unit(amount, unit, &CurrencyUnit::Msat)?,
@@ -501,7 +501,7 @@ fn cents_to_msats(cents: u64, btc_price: u64) -> Result<u64, Error> {
     // 1 BTC = price_data.USD cents
 
     // Formula: (cents * 100_000_000_000) / price_data.USD
-    let msats = (cents as u128 * 100_000_000_000u128) / btc_price as u128;
+    let msats = (cents as u128 * 100_000_000u128) / btc_price as u128;
 
     Ok(msats as u64)
 }
