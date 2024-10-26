@@ -373,17 +373,20 @@ pub enum CurrencyUnit {
     Usd,
     /// Euro
     Eur,
+    /// Custom currency unit (3 characters)
+    Custom([u8; 3]),
 }
 
 #[cfg(feature = "mint")]
 impl CurrencyUnit {
     /// Derivation index mint will use for unit
-    pub fn derivation_index(&self) -> u32 {
+    pub fn derivation_index(&self) -> Option<u32> {
         match self {
-            Self::Sat => 0,
-            Self::Msat => 1,
-            Self::Usd => 2,
-            Self::Eur => 3,
+            Self::Sat => Some(0),
+            Self::Msat => Some(1),
+            Self::Usd => Some(2),
+            Self::Eur => Some(3),
+            _ => None,
         }
     }
 }
@@ -391,12 +394,29 @@ impl CurrencyUnit {
 impl FromStr for CurrencyUnit {
     type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "sat" => Ok(Self::Sat),
-            "msat" => Ok(Self::Msat),
-            "usd" => Ok(Self::Usd),
-            "eur" => Ok(Self::Eur),
-            _ => Err(Error::UnsupportedUnit),
+        let value = &value.to_uppercase();
+        match value.as_str() {
+            "SAT" => Ok(Self::Sat),
+            "MSAT" => Ok(Self::Msat),
+            "USD" => Ok(Self::Usd),
+            "EUR" => Ok(Self::Eur),
+            c => {
+                if c.len() != 3 {
+                    return Err(Error::UnsupportedUnit);
+                }
+                // Convert to ASCII uppercase bytes
+                let bytes: [u8; 3] = c
+                    .as_bytes()
+                    .try_into()
+                    .map_err(|_| Error::UnsupportedUnit)?;
+
+                // Validate that all characters are ASCII uppercase letters
+                if bytes.iter().any(|&b| !b.is_ascii_uppercase()) {
+                    return Err(Error::UnsupportedUnit);
+                }
+
+                Ok(Self::Custom(bytes))
+            }
         }
     }
 }
@@ -404,15 +424,20 @@ impl FromStr for CurrencyUnit {
 impl fmt::Display for CurrencyUnit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            CurrencyUnit::Sat => "sat",
-            CurrencyUnit::Msat => "msat",
-            CurrencyUnit::Usd => "usd",
-            CurrencyUnit::Eur => "eur",
+            CurrencyUnit::Sat => "SAT",
+            CurrencyUnit::Msat => "MSAT",
+            CurrencyUnit::Usd => "USD",
+            CurrencyUnit::Eur => "EUR",
+            CurrencyUnit::Custom(code) => {
+                let s =
+                    std::str::from_utf8(code).expect("It is checked when enum created to be utf8");
+                s
+            }
         };
         if let Some(width) = f.width() {
-            write!(f, "{:width$}", s, width = width)
+            write!(f, "{:width$}", s.to_lowercase(), width = width)
         } else {
-            write!(f, "{}", s)
+            write!(f, "{}", s.to_lowercase())
         }
     }
 }

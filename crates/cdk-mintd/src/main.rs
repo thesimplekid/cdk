@@ -438,6 +438,7 @@ async fn main() -> anyhow::Result<()> {
         localstore,
         ln_backends.clone(),
         supported_units,
+        HashMap::new(),
     )
     .await?;
 

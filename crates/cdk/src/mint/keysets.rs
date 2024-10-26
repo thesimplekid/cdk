@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use bitcoin::bip32::DerivationPath;
 use tracing::instrument;
 
 use crate::Error;
@@ -89,8 +90,14 @@ impl Mint {
         derivation_path_index: u32,
         max_order: u8,
         input_fee_ppk: u64,
+        custom_paths: HashMap<CurrencyUnit, DerivationPath>,
     ) -> Result<(), Error> {
-        let derivation_path = derivation_path_from_unit(unit, derivation_path_index);
+        let derivation_path = match custom_paths.get(&unit) {
+            Some(path) => path.clone(),
+            None => derivation_path_from_unit(unit, derivation_path_index)
+                .ok_or(Error::UnsupportedUnit)?,
+        };
+
         let (keyset, keyset_info) = create_new_keyset(
             &self.secp_ctx,
             self.xpriv,
