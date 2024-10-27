@@ -11,6 +11,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use axum::Router;
 use bip39::Mnemonic;
+use bitcoin::bip32::{ChildNumber, DerivationPath};
 use cdk::cdk_database::{self, MintDatabase};
 use cdk::cdk_lightning;
 use cdk::cdk_lightning::MintLightning;
@@ -67,6 +68,8 @@ async fn main() -> anyhow::Result<()> {
         Some(w) => w,
         None => work_dir()?,
     };
+
+    let search_unit = CurrencyUnit::from_str("XSR")?;
 
     // get config file name from args
     let config_file_arg = match args.config {
@@ -163,8 +166,8 @@ async fn main() -> anyhow::Result<()> {
                 .await?,
             );
 
-            ln_backends.insert(LnKey::new(CurrencyUnit::Sat, PaymentMethod::Bolt11), cln);
-            supported_units.insert(CurrencyUnit::Sat, (input_fee_ppk, 64));
+            ln_backends.insert(LnKey::new(search_unit, PaymentMethod::Bolt11), cln);
+            supported_units.insert(search_unit, (input_fee_ppk, 1));
             vec![]
         }
         LnBackend::Strike => {
@@ -430,6 +433,16 @@ async fn main() -> anyhow::Result<()> {
 
     let quote_ttl = QuoteTTL::new(10000, 10000);
 
+    let search_der_path = DerivationPath::from(vec![
+        ChildNumber::from_hardened_idx(0).expect("0 is a valid index"),
+        ChildNumber::from_hardened_idx(4).expect("0 is a valid index"),
+        ChildNumber::from_hardened_idx(0).expect("0 is a valid index"),
+    ]);
+
+    let mut custom_ders = HashMap::new();
+
+    custom_ders.insert(search_unit, search_der_path);
+
     let mint = Mint::new(
         &settings.info.url,
         &mnemonic.to_seed_normalized(""),
@@ -438,7 +451,7 @@ async fn main() -> anyhow::Result<()> {
         localstore,
         ln_backends.clone(),
         supported_units,
-        HashMap::new(),
+        custom_ders,
     )
     .await?;
 

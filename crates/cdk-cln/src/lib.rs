@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bitcoin::hashes::serde::Deserialize;
 use cdk::amount::{to_unit, Amount};
 use cdk::cdk_lightning::{
     self, CreateInvoiceResponse, MintLightning, PayInvoiceResponse, PaymentQuoteResponse, Settings,
@@ -341,7 +342,15 @@ impl MintLightning for Cln {
 
         let label = Uuid::new_v4().to_string();
 
-        let amount = to_unit(amount, unit, &CurrencyUnit::Msat)?;
+        let amount =
+            if unit == &CurrencyUnit::from_str("XSR").map_err(|_| Error::UnknownInvoiceAmount)? {
+                let usd_price = get_usd_price().await.unwrap();
+                let msats = cents_to_msats(3 * u64::from(amount), usd_price)?;
+                msats.into()
+            } else {
+                to_unit(amount, unit, &CurrencyUnit::Msat)?
+            };
+
         let amount_msat = AmountOrAny::Amount(CLN_Amount::from_msat(amount.into()));
 
         let cln_response = cln_client
@@ -465,6 +474,37 @@ impl MintLightning for Cln {
             }
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct PriceResponse {
+    #[serde(rename = "USD")]
+    usd: u64,
+}
+
+async fn get_usd_price() -> Result<u64, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://mempool.space/api/v1/prices")
+        .send()
+        .await?
+        .json::<PriceResponse>()
+        .await?;
+
+    Ok(response.usd)
+}
+
+fn cents_to_msats(cents: u64, btc_price_dollars: u64) -> Result<u64, Error> {
+    // price_data.USD is price in cents
+    // 1 BTC = 100_000_000_000 msats
+    // 1 BTC = price_data.USD cents
+
+    let bitcoin_price_cents = btc_price_dollars * 100;
+
+    // Formula: (cents * 100_000_000_000) / price_data.USD
+    let msats = (cents as u128 * 100_000_000_000u128) / bitcoin_price_cents as u128;
+
+    Ok(msats as u64)
 }
 
 impl Cln {
