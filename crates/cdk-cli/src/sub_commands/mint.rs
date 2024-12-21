@@ -46,12 +46,14 @@ pub async fn mint(
     {
         Some(wallet) => wallet.clone(),
         None => {
-            let wallet = Wallet::new(&mint_url.to_string(), unit, localstore, seed, None)?;
+            let wallet = Wallet::new(&mint_url.to_string(), unit, localstore, seed, None, None)?;
 
             multi_mint_wallet.add_wallet(wallet.clone()).await;
             wallet
         }
     };
+
+    wallet.get_mint_info().await?;
 
     let quote_id = match &sub_command_args.quote_id {
         None => {
@@ -59,6 +61,7 @@ pub async fn mint(
                 .amount
                 .ok_or(anyhow!("Amount must be defined"))?;
             let quote = wallet.mint_quote(Amount::from(amount), description).await?;
+
 
             println!("Quote: {:#?}", quote);
 

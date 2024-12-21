@@ -14,7 +14,6 @@
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.rust-analyzer-src.follows = "";
     };
 
     flake-utils.url = "github:numtide/flake-utils";
@@ -51,7 +50,7 @@
         # latest stable
         stable_toolchain = pkgs.rust-bin.stable."1.83.0".default.override {
           targets = [ "wasm32-unknown-unknown" ]; # wasm
-          extensions = [ "rustfmt" "clippy" "rust-analyzer" ];
+          extensions = [ "rustfmt" "clippy" "rust-src" ];
         };
 
         # MSRV stable
@@ -86,6 +85,10 @@
           clightning
           bitcoind
           sqlx-cli
+          typos-lsp
+
+          fenix.packages.${system}.rust-analyzer
+
 
           # Needed for github ci
           libz
