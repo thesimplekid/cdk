@@ -62,8 +62,8 @@ pub enum Error {
     #[error("Auth Required")]
     AuthRequired,
     /// Auth settings undefined
-    #[error("Auth settings undefinded")]
-    AuthSettingsUndefinded,
+    #[error("Auth settings undefined")]
+    AuthSettingsUndefined,
     /// Mint time outside of tolerance
     #[error("Mint time outside of tolerance")]
     MintTimeExceedsTolerance,
@@ -71,8 +71,8 @@ pub enum Error {
     #[error("Insufficient blind auth tokens, must reauth")]
     InsufficientBlindAuthTokens,
     /// Auth localstore undefined
-    #[error("Auth localstore undefinded")]
-    AuthLocalstoreUndefinded,
+    #[error("Auth localstore undefined")]
+    AuthLocalstoreUndefined,
     /// Wallet cat not set
     #[error("Wallet cat not set")]
     CatNotSet,

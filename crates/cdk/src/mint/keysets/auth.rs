@@ -14,7 +14,7 @@ impl Mint {
         let active_keyset_id = self
             .auth_localstore
             .as_ref()
-            .ok_or(Error::AuthLocalstoreUndefinded)?
+            .ok_or(Error::AuthLocalstoreUndefined)?
             .get_active_keyset_id()
             .await?
             .ok_or(Error::AmountKey)?;

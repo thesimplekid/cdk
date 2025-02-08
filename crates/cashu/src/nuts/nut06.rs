@@ -255,16 +255,14 @@ pub struct Nuts {
     #[serde(default)]
     #[serde(rename = "20")]
     pub nut20: SupportedSettings,
-    /// NUTXX Settings
-    #[serde(default)]
-    #[serde(rename = "XX")]
+    /// NUT21 Settings
+    #[serde(rename = "21")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub nutxx: Option<nut21::Settings>,
-    /// NUTXX1 Settings
-    #[serde(default)]
-    #[serde(rename = "XX+1")]
+    pub nut21: Option<nut21::Settings>,
+    /// NUT22 Settings
+    #[serde(rename = "22")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub nutxx1: Option<nut22::Settings>,
+    pub nut22: Option<nut22::Settings>,
 }
 
 impl Nuts {

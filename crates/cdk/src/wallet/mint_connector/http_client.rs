@@ -53,6 +53,8 @@ impl HttpClient {
             .await
             .map_err(|e| Error::HttpError(e.to_string()))?;
 
+        println!("{}", response);
+
         serde_json::from_str::<R>(&response).map_err(|err| {
             tracing::warn!("Http Response error: {}", err);
             match ErrorResponse::from_json(&response) {

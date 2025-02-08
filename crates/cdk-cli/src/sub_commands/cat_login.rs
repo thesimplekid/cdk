@@ -51,8 +51,8 @@ pub async fn cat_login(
 
     let openid_discovery = mint_info
         .nuts
-        .nutxx
-        .expect("Nutxx defined")
+        .nut21
+        .expect("Nut21 defined")
         .openid_discovery;
 
     let oidc_client = OidcClient::new(openid_discovery);

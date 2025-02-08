@@ -238,7 +238,7 @@ impl MintBuilder {
     ) -> Self {
         let mut nuts = self.mint_info.nuts;
 
-        nuts.nutxx = Some(nut21::Settings::new(
+        nuts.nut21 = Some(nut21::Settings::new(
             openid_discovery,
             client_id,
             protected_endpoints.clone(),
@@ -262,7 +262,7 @@ impl MintBuilder {
     ) -> Self {
         let mut nuts = self.mint_info.nuts;
 
-        nuts.nutxx1 = Some(nut22::Settings::new(
+        nuts.nut22 = Some(nut22::Settings::new(
             bat_max_mint,
             protected_endpoints.clone(),
         ));

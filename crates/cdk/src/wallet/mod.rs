@@ -242,6 +242,7 @@ impl Wallet {
     pub async fn get_mint_info(&self) -> Result<Option<MintInfo>, Error> {
         match self.client.get_mint_info().await {
             Ok(mint_info) => {
+                println!("{:?}", mint_info);
                 // If mint provides time make sure it is accurate
                 if let Some(mint_unix_time) = mint_info.time {
                     let current_unix_time = unix_time();
@@ -261,13 +262,13 @@ impl Wallet {
 
                 let mut protected_endpoints = self.protected_endpoints.write().await;
 
-                if let Some(nutxx_settings) = &mint_info.nuts.nutxx {
+                if let Some(nutxx_settings) = &mint_info.nuts.nut21 {
                     for endpoint in nutxx_settings.protected_endpoints.iter() {
                         protected_endpoints.insert(*endpoint, AuthRequired::Clear);
                     }
                 }
 
-                if let Some(nutxx1_settings) = &mint_info.nuts.nutxx1 {
+                if let Some(nutxx1_settings) = &mint_info.nuts.nut22 {
                     for endpoint in nutxx1_settings.protected_endpoints.iter() {
                         protected_endpoints.insert(*endpoint, AuthRequired::Blind);
                     }

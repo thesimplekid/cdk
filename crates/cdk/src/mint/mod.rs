@@ -191,7 +191,7 @@ impl Mint {
             tracing::info!("Auth enabled creating auth keysets");
             let auth_localstore = auth_localstore
                 .as_ref()
-                .ok_or(Error::AuthSettingsUndefinded)?;
+                .ok_or(Error::AuthSettingsUndefined)?;
 
             let derivation_path = match custom_paths.get(&CurrencyUnit::Auth) {
                 Some(path) => path.clone(),

@@ -148,7 +148,7 @@ impl Mint {
         let auth_localstore = self
             .auth_localstore
             .as_ref()
-            .ok_or(Error::AuthSettingsUndefinded)?;
+            .ok_or(Error::AuthSettingsUndefined)?;
 
         let keyset_info = auth_localstore
             .get_keyset_info(keyset_id)

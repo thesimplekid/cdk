@@ -94,7 +94,7 @@ pub async fn top_up_blind_auth_proofs(
 
     let openid_discovery = mint_info
         .nuts
-        .nutxx
+        .nut21
         .expect("Nutxx defined")
         .openid_discovery;
 

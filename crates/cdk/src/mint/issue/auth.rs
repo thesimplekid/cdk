@@ -25,8 +25,8 @@ impl Mint {
             .mint_info()
             .await?
             .nuts
-            .nutxx1
-            .ok_or(Error::AuthSettingsUndefinded)?;
+            .nut22
+            .ok_or(Error::AuthSettingsUndefined)?;
 
         if mint_auth_request.amount() > auth_settings.bat_max_mint {
             return Err(Error::AmountOutofLimitRange(
