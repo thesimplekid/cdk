@@ -85,7 +85,7 @@ impl Mint {
 
         let quote_expiry = unix_time() + mint_ttl;
 
-        if description.is_some() && !ln.get_settings().invoice_description {
+        if description.is_some() && !ln.get_settings().await?.invoice_description {
             tracing::error!("Backend does not support invoice description");
             return Err(Error::InvoiceDescriptionUnsupported);
         }

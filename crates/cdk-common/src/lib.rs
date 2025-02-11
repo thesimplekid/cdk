@@ -11,6 +11,7 @@ pub mod database;
 pub mod error;
 #[cfg(feature = "mint")]
 pub mod lightning;
+pub mod proto;
 pub mod pub_sub;
 #[cfg(feature = "mint")]
 pub mod subscription;
@@ -26,3 +27,7 @@ pub use cashu::nuts::{self, *};
 #[cfg(feature = "wallet")]
 pub use cashu::wallet;
 pub use cashu::{dhke, mint_url, secret, util, SECP256K1};
+pub use proto::cdk_payment_processor_client::CdkPaymentProcessorClient;
+pub use proto::cdk_payment_processor_server::CdkPaymentProcessorServer;
+#[doc(hidden)]
+pub use tonic;

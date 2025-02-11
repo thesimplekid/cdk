@@ -63,12 +63,12 @@ impl Cln {
 impl MintLightning for Cln {
     type Err = cdk_lightning::Error;
 
-    fn get_settings(&self) -> Settings {
-        Settings {
+    async fn get_settings(&self) -> Result<Settings, Self::Err> {
+        Ok(Settings {
             mpp: true,
             unit: CurrencyUnit::Msat,
             invoice_description: true,
-        }
+        })
     }
 
     /// Is wait invoice active

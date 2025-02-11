@@ -67,12 +67,12 @@ impl LNbits {
 impl MintLightning for LNbits {
     type Err = cdk_lightning::Error;
 
-    fn get_settings(&self) -> Settings {
-        Settings {
+    async fn get_settings(&self) -> Result<Settings, Self::Err> {
+        Ok(Settings {
             mpp: false,
             unit: CurrencyUnit::Sat,
             invoice_description: true,
-        }
+        })
     }
 
     fn is_wait_invoice_active(&self) -> bool {
@@ -312,7 +312,7 @@ impl MintLightning for LNbits {
                 payment.details.amount.unsigned_abs()
                     + payment.details.fee.unsigned_abs() / MSAT_IN_SAT,
             ),
-            unit: self.get_settings().unit,
+            unit: self.get_settings().await?.unit,
         };
 
         Ok(pay_response)

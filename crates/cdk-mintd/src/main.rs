@@ -169,12 +169,14 @@ async fn main() -> anyhow::Result<()> {
             };
             ln_backends.insert(ln_key, cln.clone());
 
-            mint_builder = mint_builder.add_ln_backend(
-                CurrencyUnit::Sat,
-                PaymentMethod::Bolt11,
-                mint_melt_limits,
-                cln.clone(),
-            );
+            mint_builder = mint_builder
+                .add_ln_backend(
+                    CurrencyUnit::Sat,
+                    PaymentMethod::Bolt11,
+                    mint_melt_limits,
+                    cln.clone(),
+                )
+                .await?;
 
             let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, CurrencyUnit::Sat);
 
@@ -192,12 +194,14 @@ async fn main() -> anyhow::Result<()> {
                     .setup(&mut ln_routers, &settings, unit.clone())
                     .await?;
 
-                mint_builder = mint_builder.add_ln_backend(
-                    unit.clone(),
-                    PaymentMethod::Bolt11,
-                    mint_melt_limits,
-                    Arc::new(strike),
-                );
+                mint_builder = mint_builder
+                    .add_ln_backend(
+                        unit.clone(),
+                        PaymentMethod::Bolt11,
+                        mint_melt_limits,
+                        Arc::new(strike),
+                    )
+                    .await?;
                 let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, unit);
 
                 mint_builder = mint_builder.add_supported_websockets(nut17_supported);
@@ -209,12 +213,14 @@ async fn main() -> anyhow::Result<()> {
                 .setup(&mut ln_routers, &settings, CurrencyUnit::Sat)
                 .await?;
 
-            mint_builder = mint_builder.add_ln_backend(
-                CurrencyUnit::Sat,
-                PaymentMethod::Bolt11,
-                mint_melt_limits,
-                Arc::new(lnbits),
-            );
+            mint_builder = mint_builder
+                .add_ln_backend(
+                    CurrencyUnit::Sat,
+                    PaymentMethod::Bolt11,
+                    mint_melt_limits,
+                    Arc::new(lnbits),
+                )
+                .await?;
             let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, CurrencyUnit::Sat);
 
             mint_builder = mint_builder.add_supported_websockets(nut17_supported);
@@ -225,12 +231,14 @@ async fn main() -> anyhow::Result<()> {
                 .setup(&mut ln_routers, &settings, CurrencyUnit::Sat)
                 .await?;
 
-            mint_builder = mint_builder.add_ln_backend(
-                CurrencyUnit::Sat,
-                PaymentMethod::Bolt11,
-                mint_melt_limits,
-                Arc::new(phd),
-            );
+            mint_builder = mint_builder
+                .add_ln_backend(
+                    CurrencyUnit::Sat,
+                    PaymentMethod::Bolt11,
+                    mint_melt_limits,
+                    Arc::new(phd),
+                )
+                .await?;
 
             let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, CurrencyUnit::Sat);
 
@@ -242,12 +250,14 @@ async fn main() -> anyhow::Result<()> {
                 .setup(&mut ln_routers, &settings, CurrencyUnit::Msat)
                 .await?;
 
-            mint_builder = mint_builder.add_ln_backend(
-                CurrencyUnit::Sat,
-                PaymentMethod::Bolt11,
-                mint_melt_limits,
-                Arc::new(lnd),
-            );
+            mint_builder = mint_builder
+                .add_ln_backend(
+                    CurrencyUnit::Sat,
+                    PaymentMethod::Bolt11,
+                    mint_melt_limits,
+                    Arc::new(lnd),
+                )
+                .await?;
 
             let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, CurrencyUnit::Sat);
 
@@ -263,12 +273,14 @@ async fn main() -> anyhow::Result<()> {
 
                 let fake = Arc::new(fake);
 
-                mint_builder = mint_builder.add_ln_backend(
-                    unit.clone(),
-                    PaymentMethod::Bolt11,
-                    mint_melt_limits,
-                    fake.clone(),
-                );
+                mint_builder = mint_builder
+                    .add_ln_backend(
+                        unit.clone(),
+                        PaymentMethod::Bolt11,
+                        mint_melt_limits,
+                        fake.clone(),
+                    )
+                    .await?;
 
                 let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, unit);
 

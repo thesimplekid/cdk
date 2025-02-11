@@ -74,12 +74,12 @@ impl Phoenixd {
 impl MintLightning for Phoenixd {
     type Err = cdk_lightning::Error;
 
-    fn get_settings(&self) -> Settings {
-        Settings {
+    async fn get_settings(&self) -> Result<Settings, Self::Err> {
+        Ok(Settings {
             mpp: false,
             unit: CurrencyUnit::Sat,
             invoice_description: true,
-        }
+        })
     }
     fn is_wait_invoice_active(&self) -> bool {
         self.wait_invoice_is_active.load(Ordering::SeqCst)

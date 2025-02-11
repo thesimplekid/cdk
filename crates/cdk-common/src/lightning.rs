@@ -41,9 +41,15 @@ pub enum Error {
     /// Amount Error
     #[error(transparent)]
     Amount(#[from] crate::amount::Error),
+    /// NUT04 Error
+    #[error(transparent)]
+    NUT04(#[from] crate::nuts::nut04::Error),
     /// NUT05 Error
     #[error(transparent)]
     NUT05(#[from] crate::nuts::nut05::Error),
+    /// Tonic
+    #[error(transparent)]
+    Tonic(#[from] tonic::Status),
 }
 
 /// MintLighting Trait
@@ -53,7 +59,7 @@ pub trait MintLightning {
     type Err: Into<Error> + From<Error>;
 
     /// Base Unit
-    fn get_settings(&self) -> Settings;
+    async fn get_settings(&self) -> Result<Settings, Self::Err>;
 
     /// Create a new invoice
     async fn create_invoice(

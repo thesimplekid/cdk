@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use bitcoin::bip32::DerivationPath;
 use cdk_common::database::{self, MintDatabase};
+use cdk_common::error::Error;
 
 use super::nut17::SupportedMethods;
 use super::nut19::{self, CachedEndpoint};
@@ -113,13 +114,13 @@ impl MintBuilder {
     }
 
     /// Add ln backend
-    pub fn add_ln_backend(
+    pub async fn add_ln_backend(
         mut self,
         unit: CurrencyUnit,
         method: PaymentMethod,
         limits: MintMeltLimits,
         ln_backend: Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let ln_key = LnKey {
             unit: unit.clone(),
             method,
@@ -127,7 +128,7 @@ impl MintBuilder {
 
         let mut ln = self.ln.unwrap_or_default();
 
-        let settings = ln_backend.get_settings();
+        let settings = ln_backend.get_settings().await?;
 
         if settings.mpp {
             let mpp_settings = MppMethodSettings {
@@ -173,7 +174,7 @@ impl MintBuilder {
 
         self.ln = Some(ln);
 
-        self
+        Ok(self)
     }
 
     /// Set pubkey

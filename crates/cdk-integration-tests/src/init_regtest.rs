@@ -159,12 +159,14 @@ where
     let localstore = Arc::new(database);
     mint_builder = mint_builder.with_localstore(localstore.clone());
 
-    mint_builder = mint_builder.add_ln_backend(
-        CurrencyUnit::Sat,
-        PaymentMethod::Bolt11,
-        MintMeltLimits::new(1, 5_000),
-        Arc::new(lighting),
-    );
+    mint_builder = mint_builder
+        .add_ln_backend(
+            CurrencyUnit::Sat,
+            PaymentMethod::Bolt11,
+            MintMeltLimits::new(1, 5_000),
+            Arc::new(lighting),
+        )
+        .await?;
 
     let mnemonic = Mnemonic::generate(12)?;
 

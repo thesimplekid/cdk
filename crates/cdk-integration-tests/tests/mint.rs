@@ -1,6 +1,6 @@
 //! Mint tests
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +10,7 @@ use cdk::amount::{Amount, SplitTarget};
 use cdk::cdk_database::mint_memory::MintMemoryDatabase;
 use cdk::cdk_database::MintDatabase;
 use cdk::dhke::construct_proofs;
-use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits, MintQuote};
+use cdk::mint::{MintBuilder, MintMeltLimits, MintQuote, PaymentProcessor};
 use cdk::nuts::nut00::ProofsMethods;
 use cdk::nuts::{
     CurrencyUnit, Id, MintBolt11Request, MintInfo, NotificationPayload, Nuts, PaymentMethod,
@@ -20,7 +20,6 @@ use cdk::subscription::{IndexableParams, Params};
 use cdk::types::QuoteTTL;
 use cdk::util::unix_time;
 use cdk::Mint;
-use cdk_fake_wallet::FakeWallet;
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
 
@@ -445,25 +444,29 @@ async fn test_mint_enforce_fee() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_correct_keyset() -> Result<()> {
     let mnemonic = Mnemonic::generate(12)?;
-    let fee_reserve = FeeReserve {
-        min_fee_reserve: 1.into(),
-        percent_fee_reserve: 1.0,
-    };
+    // let fee_reserve = FeeReserve {
+    //     min_fee_reserve: 1.into(),
+    //     percent_fee_reserve: 1.0,
+    // };
 
     let database = MintMemoryDatabase::default();
 
-    let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
+    // let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
+
+    let fake_wallet = PaymentProcessor::new("127.0.0.1", 8089, None).await?;
 
     let mut mint_builder = MintBuilder::new();
     let localstore = Arc::new(database);
     mint_builder = mint_builder.with_localstore(localstore.clone());
 
-    mint_builder = mint_builder.add_ln_backend(
-        CurrencyUnit::Sat,
-        PaymentMethod::Bolt11,
-        MintMeltLimits::new(1, 5_000),
-        Arc::new(fake_wallet),
-    );
+    mint_builder = mint_builder
+        .add_ln_backend(
+            CurrencyUnit::Sat,
+            PaymentMethod::Bolt11,
+            MintMeltLimits::new(1, 5_000),
+            Arc::new(fake_wallet),
+        )
+        .await?;
 
     mint_builder = mint_builder
         .with_name("regtest mint".to_string())

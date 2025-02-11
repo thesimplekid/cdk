@@ -65,12 +65,12 @@ impl Strike {
 impl MintLightning for Strike {
     type Err = cdk_lightning::Error;
 
-    fn get_settings(&self) -> Settings {
-        Settings {
+    async fn get_settings(&self) -> Result<Settings, Self::Err> {
+        Ok(Settings {
             mpp: false,
             unit: self.unit.clone(),
             invoice_description: true,
-        }
+        })
     }
 
     fn is_wait_invoice_active(&self) -> bool {

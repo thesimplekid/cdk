@@ -30,6 +30,7 @@ mod keysets;
 mod ln;
 mod melt;
 mod mint_nut04;
+mod payment_processor;
 mod start_up_check;
 pub mod subscription;
 mod swap;
@@ -37,6 +38,7 @@ mod verification;
 
 pub use builder::{MintBuilder, MintMeltLimits};
 pub use cdk_common::mint::{MeltQuote, MintQuote};
+pub use payment_processor::PaymentProcessor;
 
 /// Cashu Mint
 #[derive(Clone)]

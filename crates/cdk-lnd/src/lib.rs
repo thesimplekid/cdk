@@ -79,12 +79,12 @@ impl MintLightning for Lnd {
     type Err = cdk_lightning::Error;
 
     #[instrument(skip_all)]
-    fn get_settings(&self) -> Settings {
-        Settings {
+    async fn get_settings(&self) -> Result<Settings, Self::Err> {
+        Ok(Settings {
             mpp: true,
             unit: CurrencyUnit::Msat,
             invoice_description: true,
-        }
+        })
     }
 
     #[instrument(skip_all)]
@@ -477,7 +477,7 @@ impl MintLightning for Lnd {
                         payment_preimage: None,
                         status: MeltQuoteState::Unknown,
                         total_spent: Amount::ZERO,
-                        unit: self.get_settings().unit,
+                        unit: self.get_settings().await?.unit,
                     });
                 } else {
                     return Err(cdk_lightning::Error::UnknownPaymentState);
@@ -496,7 +496,7 @@ impl MintLightning for Lnd {
                             payment_preimage: Some(update.payment_preimage),
                             status: MeltQuoteState::Unknown,
                             total_spent: Amount::ZERO,
-                            unit: self.get_settings().unit,
+                            unit: self.get_settings().await?.unit,
                         },
                         PaymentStatus::InFlight => {
                             // Continue waiting for the next update
@@ -520,7 +520,7 @@ impl MintLightning for Lnd {
                             payment_preimage: Some(update.payment_preimage),
                             status: MeltQuoteState::Failed,
                             total_spent: Amount::ZERO,
-                            unit: self.get_settings().unit,
+                            unit: self.get_settings().await?.unit,
                         },
                     };
 
