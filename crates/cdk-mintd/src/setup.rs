@@ -5,10 +5,10 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use axum::Router;
 use bip39::rand::{thread_rng, Rng};
-use cdk::cdk_lightning::MintLightning;
-use cdk::mint::FeeReserve;
+use cdk::cdk_payment::MintPayment;
 use cdk::mint_url::MintUrl;
 use cdk::nuts::CurrencyUnit;
+use cdk::types::FeeReserve;
 use tokio::sync::Mutex;
 
 use crate::config::{self, Settings};
@@ -21,7 +21,7 @@ pub trait LnBackendSetup {
         routers: &mut Vec<Router>,
         settings: &Settings,
         unit: CurrencyUnit,
-    ) -> anyhow::Result<impl MintLightning>;
+    ) -> anyhow::Result<impl MintPayment>;
 }
 
 #[async_trait]
