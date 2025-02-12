@@ -204,7 +204,7 @@ impl CdkPaymentProcessor for FakeWallet {
         // Since this is fake we just use the amount no matter the unit to create an invoice
         let amount_msat = amount;
 
-        let invoice = create_fake_invoice(amount_msat.into(), description);
+        let invoice = create_fake_invoice(amount_msat, description);
 
         let sender = self.sender.clone();
 
@@ -261,7 +261,7 @@ impl CdkPaymentProcessor for FakeWallet {
         Ok(Response::new(PaymentQuoteResponse {
             request_lookup_id: melt_quote_request.request.payment_hash().to_string(),
             amount: amount.into(),
-            fee: fee.into(),
+            fee,
             state: QuoteState::from(MeltQuoteState::Unpaid).into(),
         }))
     }
@@ -276,9 +276,7 @@ impl CdkPaymentProcessor for FakeWallet {
             max_fee_amount: _,
         } = request.into_inner();
 
-        let melt_quote: MeltQuote = melt_quote
-            .ok_or(Status::invalid_argument("No melt quote"))?
-            .into();
+        let melt_quote: MeltQuote = melt_quote.ok_or(Status::invalid_argument("No melt quote"))?;
 
         let bolt11 = Bolt11Invoice::from_str(&melt_quote.request)
             .map_err(|_| Status::internal("Invalid bolt11"))?;

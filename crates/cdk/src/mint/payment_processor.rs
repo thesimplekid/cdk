@@ -167,7 +167,7 @@ impl MintLightning for PaymentProcessor {
 
         let status = check_incoming.status().as_str_name();
 
-        Ok(MintQuoteState::from_str(&status)?)
+        Ok(MintQuoteState::from_str(status)?)
     }
 
     async fn check_outgoing_payment(
