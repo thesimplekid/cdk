@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use bip39::Mnemonic;
 use cdk::amount::SplitTarget;
 use cdk::cdk_database::mint_memory::MintMemoryDatabase;
 use cdk::cdk_database::{MintDatabase, WalletMemoryDatabase};
-use cdk::mint::{MintBuilder, MintMeltLimits, PaymentProcessor};
+use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits};
 use cdk::nuts::nut00::ProofsMethods;
 use cdk::nuts::{
     CheckStateRequest, CheckStateResponse, CurrencyUnit, Id, KeySet, KeysetResponse,
@@ -20,6 +21,7 @@ use cdk::util::unix_time;
 use cdk::wallet::client::MintConnector;
 use cdk::wallet::Wallet;
 use cdk::{Amount, Error, Mint};
+use cdk_fake_wallet::FakeWallet;
 use tokio::sync::Notify;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -161,25 +163,24 @@ pub async fn create_and_start_test_mint() -> anyhow::Result<Arc<Mint>> {
     let localstore = Arc::new(database);
     mint_builder = mint_builder.with_localstore(localstore.clone());
 
-    // let fee_reserve = FeeReserve {
-    //     min_fee_reserve: 1.into(),
-    //     percent_fee_reserve: 1.0,
-    // };
+    let fee_reserve = FeeReserve {
+        min_fee_reserve: 1.into(),
+        percent_fee_reserve: 1.0,
+    };
 
-    // let ln_fake_backend = Arc::new(FakeWallet::new(
-    //     fee_reserve.clone(),
-    //     HashMap::default(),
-    //     HashSet::default(),
-    //     0,
-    // ));
-    let fake_wallet = PaymentProcessor::new("127.0.0.1", 8089, None).await?;
+    let ln_fake_backend = FakeWallet::new(
+        fee_reserve.clone(),
+        HashMap::default(),
+        HashSet::default(),
+        0,
+    );
 
     mint_builder = mint_builder
         .add_ln_backend(
             CurrencyUnit::Sat,
             PaymentMethod::Bolt11,
             MintMeltLimits::new(1, 1_000),
-            Arc::new(fake_wallet),
+            Arc::new(ln_fake_backend),
         )
         .await?;
 

@@ -1,11 +1,13 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
 use bip39::Mnemonic;
 use cdk::cdk_database::{self, MintDatabase};
-use cdk::mint::{MintBuilder, MintMeltLimits, PaymentProcessor};
+use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits};
 use cdk::nuts::{CurrencyUnit, PaymentMethod};
 use cdk::types::QuoteTTL;
+use cdk_fake_wallet::FakeWallet;
 use tracing_subscriber::EnvFilter;
 
 use crate::init_mint::start_mint;
@@ -27,9 +29,12 @@ where
     // Parse input
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
-    // let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
+    let fee_reserve = FeeReserve {
+        min_fee_reserve: 1.into(),
+        percent_fee_reserve: 0.0,
+    };
 
-    let fake_wallet = PaymentProcessor::new("127.0.0.1", 8089, None).await?;
+    let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
 
     let mut mint_builder = MintBuilder::new();
 
@@ -45,8 +50,12 @@ where
         )
         .await?;
 
-    // let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
-    let fake_wallet = PaymentProcessor::new("127.0.0.1", 8089, None).await?;
+    let fee_reserve = FeeReserve {
+        min_fee_reserve: 1.into(),
+        percent_fee_reserve: 0.0,
+    };
+
+    let fake_wallet = FakeWallet::new(fee_reserve, HashMap::default(), HashSet::default(), 0);
 
     mint_builder = mint_builder
         .add_ln_backend(
