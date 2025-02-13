@@ -54,6 +54,7 @@ enum QuoteState {
     PENDING = 2;
     UNKNOWN = 3;
     FAILED = 4;
+    ISSUED = 5;
 }
 
 

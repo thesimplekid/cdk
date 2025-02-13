@@ -38,7 +38,8 @@ mod verification;
 
 pub use builder::{MintBuilder, MintMeltLimits};
 pub use cdk_common::mint::{MeltQuote, MintQuote};
-pub use payment_processor::PaymentProcessor;
+pub use payment_processor::client::PaymentProcessor;
+pub use payment_processor::PaymentProcessorServer;
 
 /// Cashu Mint
 #[derive(Clone)]
