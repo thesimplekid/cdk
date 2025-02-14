@@ -12,7 +12,7 @@ use super::nut17::SupportedMethods;
 use super::nut19::{self, CachedEndpoint};
 use super::Nuts;
 use crate::amount::Amount;
-use crate::cdk_lightning::{self, MintLightning};
+use crate::cdk_payment::{self, MintPayment};
 use crate::mint::Mint;
 use crate::nuts::{
     ContactInfo, CurrencyUnit, MeltMethodSettings, MintInfo, MintMethodSettings, MintVersion,
@@ -28,7 +28,7 @@ pub struct MintBuilder {
     /// Mint Storage backend
     localstore: Option<Arc<dyn MintDatabase<Err = database::Error> + Send + Sync>>,
     /// Ln backends for mint
-    ln: Option<HashMap<LnKey, Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>>>,
+    ln: Option<HashMap<LnKey, Arc<dyn MintPayment<Err = cdk_payment::Error> + Send + Sync>>>,
     seed: Option<Vec<u8>>,
     supported_units: HashMap<CurrencyUnit, (u64, u8)>,
     custom_paths: HashMap<CurrencyUnit, DerivationPath>,
@@ -119,7 +119,7 @@ impl MintBuilder {
         unit: CurrencyUnit,
         method: PaymentMethod,
         limits: MintMeltLimits,
-        ln_backend: Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>,
+        ln_backend: Arc<dyn MintPayment<Err = cdk_payment::Error> + Send + Sync>,
     ) -> Result<Self, Error> {
         let ln_key = LnKey {
             unit: unit.clone(),

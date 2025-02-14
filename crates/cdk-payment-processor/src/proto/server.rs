@@ -4,8 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cdk_common::lightning::MintLightning;
-use cdk_common::{CurrencyUnit, MeltQuoteBolt11Request};
+use cdk_common::payment::MintPayment;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
@@ -17,7 +16,7 @@ use crate::proto::*;
 /// Payment Processor
 #[derive(Clone)]
 pub struct PaymentProcessorServer {
-    inner: Arc<dyn MintLightning<Err = cdk_common::lightning::Error> + Send + Sync>,
+    inner: Arc<dyn MintPayment<Err = cdk_common::payment::Error> + Send + Sync>,
     socket_addr: SocketAddr,
     shutdown: Arc<Notify>,
     handle: Option<Arc<JoinHandle<anyhow::Result<()>>>>,
@@ -116,7 +115,12 @@ impl CdkPaymentProcessor for PaymentProcessorServer {
             CurrencyUnit::from_str(&unit).map_err(|_| Status::invalid_argument("Invalid unit"))?;
         let invoice_response = self
             .inner
-            .create_invoice(amount.into(), &unit, description, unix_expiry.unwrap())
+            .create_incoming_payment_request(
+                amount.into(),
+                &unit,
+                description,
+                unix_expiry.unwrap(),
+            )
             .await
             .map_err(|_| Status::internal("Could not create invoice"))?;
 
@@ -128,13 +132,25 @@ impl CdkPaymentProcessor for PaymentProcessorServer {
         request: Request<PaymentQuoteRequest>,
     ) -> Result<Response<PaymentQuoteResponse>, Status> {
         let request = request.into_inner();
-        let bolt11_melt_quote: MeltQuoteBolt11Request = request
-            .try_into()
-            .map_err(|_| Status::invalid_argument("Invalid request"))?;
+
+        let options: Option<cdk_common::MeltOptions> = match &request.options {
+            Some(options) => Some(
+                options
+                    .clone()
+                    .try_into()
+                    .map_err(|_| Status::invalid_argument("Invalid melt options"))?,
+            ),
+            None => None,
+        };
 
         let payment_quote = self
             .inner
-            .get_payment_quote(&bolt11_melt_quote)
+            .get_payment_quote(
+                &request.request,
+                &CurrencyUnit::from_str(&request.unit)
+                    .map_err(|_| Status::invalid_argument("Invalid currency unit"))?,
+                options,
+            )
             .await
             .map_err(|err| {
                 tracing::error!("Could not get bolt11 melt quote: {}", err);
@@ -152,7 +168,7 @@ impl CdkPaymentProcessor for PaymentProcessorServer {
 
         let pay_invoice = self
             .inner
-            .pay_invoice(
+            .make_payment(
                 request
                     .melt_quote
                     .ok_or(Status::invalid_argument("Meltquote is required"))?
@@ -175,7 +191,7 @@ impl CdkPaymentProcessor for PaymentProcessorServer {
 
         let check_response = self
             .inner
-            .check_incoming_invoice_status(&request.request_lookup_id)
+            .check_incoming_payment_status(&request.request_lookup_id)
             .await
             .map_err(|_| Status::internal("Could not check incoming payment status"))?;
 

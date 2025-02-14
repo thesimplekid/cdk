@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use axum::{async_trait, Router};
-use cdk::cdk_lightning::MintLightning;
+use cdk::cdk_payment::MintPayment;
 use cdk::mint::FeeReserve;
 use cdk::mint_url::MintUrl;
 use cdk::nuts::CurrencyUnit;
@@ -19,7 +19,7 @@ pub trait LnBackendSetup {
         routers: &mut Vec<Router>,
         settings: &Settings,
         unit: CurrencyUnit,
-    ) -> anyhow::Result<impl MintLightning>;
+    ) -> anyhow::Result<impl MintPayment>;
 }
 
 #[async_trait]

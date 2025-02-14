@@ -14,11 +14,12 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use cdk::amount::{to_unit, Amount, MSAT_IN_SAT};
-use cdk::cdk_lightning::{
-    self, CreateInvoiceResponse, MintLightning, PayInvoiceResponse, PaymentQuoteResponse, Settings,
+use cdk::cdk_payment::{
+    self, CreateIncomingPaymentResponse, MakePaymentResponse, MintPayment, PaymentQuoteResponse,
+    Settings,
 };
 use cdk::mint::FeeReserve;
-use cdk::nuts::{CurrencyUnit, MeltQuoteBolt11Request, MeltQuoteState, MintQuoteState};
+use cdk::nuts::{CurrencyUnit, MeltOptions, MeltQuoteState, MintQuoteState};
 use cdk::secp256k1::hashes::Hash;
 use cdk::util::{hex, unix_time};
 use cdk::{mint, Bolt11Invoice};
@@ -75,8 +76,8 @@ impl Lnd {
 }
 
 #[async_trait]
-impl MintLightning for Lnd {
-    type Err = cdk_lightning::Error;
+impl MintPayment for Lnd {
+    type Err = cdk_payment::Error;
 
     #[instrument(skip_all)]
     async fn get_settings(&self) -> Result<Settings, Self::Err> {
@@ -173,11 +174,21 @@ impl MintLightning for Lnd {
     #[instrument(skip_all)]
     async fn get_payment_quote(
         &self,
-        melt_quote_request: &MeltQuoteBolt11Request,
+        request: &str,
+        unit: &CurrencyUnit,
+        options: Option<MeltOptions>,
     ) -> Result<PaymentQuoteResponse, Self::Err> {
-        let amount = melt_quote_request.amount_msat()?;
+        let bolt11 = Bolt11Invoice::from_str(&request)?;
 
-        let amount = amount / MSAT_IN_SAT.into();
+        let amount_msat = match options {
+            Some(amount) => amount.amount_msat(),
+            None => bolt11
+                .amount_milli_satoshis()
+                .ok_or(Error::UnknownInvoiceAmount)?
+                .into(),
+        };
+
+        let amount = to_unit(amount_msat, &CurrencyUnit::Msat, unit)?;
 
         let relative_fee_reserve =
             (self.fee_reserve.percent_fee_reserve * u64::from(amount) as f32) as u64;
@@ -190,7 +201,7 @@ impl MintLightning for Lnd {
         };
 
         Ok(PaymentQuoteResponse {
-            request_lookup_id: melt_quote_request.request.payment_hash().to_string(),
+            request_lookup_id: bolt11.payment_hash().to_string(),
             amount,
             fee: fee.into(),
             state: MeltQuoteState::Unpaid,
@@ -198,12 +209,12 @@ impl MintLightning for Lnd {
     }
 
     #[instrument(skip_all)]
-    async fn pay_invoice(
+    async fn make_payment(
         &self,
         melt_quote: mint::MeltQuote,
         partial_amount: Option<Amount>,
         max_fee: Option<Amount>,
-    ) -> Result<PayInvoiceResponse, Self::Err> {
+    ) -> Result<MakePaymentResponse, Self::Err> {
         let payment_request = melt_quote.request;
         let bolt11 = Bolt11Invoice::from_str(&payment_request)?;
 
@@ -321,9 +332,9 @@ impl MintLightning for Lnd {
                     total_amt = (route.total_amt_msat / 1000) as u64;
                 }
 
-                Ok(PayInvoiceResponse {
+                Ok(MakePaymentResponse {
                     payment_lookup_id: hex::encode(payment_hash),
-                    payment_preimage,
+                    payment_proof: payment_preimage,
                     status,
                     total_spent: total_amt.into(),
                     unit: CurrencyUnit::Sat,
@@ -367,9 +378,9 @@ impl MintLightning for Lnd {
                     ),
                 };
 
-                Ok(PayInvoiceResponse {
+                Ok(MakePaymentResponse {
                     payment_lookup_id: hex::encode(payment_response.payment_hash),
-                    payment_preimage,
+                    payment_proof: payment_preimage,
                     status,
                     total_spent: total_amount.into(),
                     unit: CurrencyUnit::Sat,
@@ -379,13 +390,13 @@ impl MintLightning for Lnd {
     }
 
     #[instrument(skip(self, description))]
-    async fn create_invoice(
+    async fn create_incoming_payment_request(
         &self,
         amount: Amount,
         unit: &CurrencyUnit,
         description: String,
         unix_expiry: u64,
-    ) -> Result<CreateInvoiceResponse, Self::Err> {
+    ) -> Result<CreateIncomingPaymentResponse, Self::Err> {
         let time_now = unix_time();
         assert!(unix_expiry > time_now);
 
@@ -409,15 +420,15 @@ impl MintLightning for Lnd {
 
         let bolt11 = Bolt11Invoice::from_str(&invoice.payment_request)?;
 
-        Ok(CreateInvoiceResponse {
+        Ok(CreateIncomingPaymentResponse {
             request_lookup_id: bolt11.payment_hash().to_string(),
-            request: bolt11,
+            request: bolt11.to_string(),
             expiry: Some(unix_expiry),
         })
     }
 
     #[instrument(skip(self))]
-    async fn check_incoming_invoice_status(
+    async fn check_incoming_payment_status(
         &self,
         request_lookup_id: &str,
     ) -> Result<MintQuoteState, Self::Err> {
@@ -453,7 +464,7 @@ impl MintLightning for Lnd {
     async fn check_outgoing_payment(
         &self,
         payment_hash: &str,
-    ) -> Result<PayInvoiceResponse, Self::Err> {
+    ) -> Result<MakePaymentResponse, Self::Err> {
         let track_request = fedimint_tonic_lnd::routerrpc::TrackPaymentRequest {
             payment_hash: hex::decode(payment_hash).map_err(|_| Error::InvalidHash)?,
             no_inflight_updates: true,
@@ -472,15 +483,15 @@ impl MintLightning for Lnd {
             Err(err) => {
                 let err_code = err.code();
                 if err_code == Code::NotFound {
-                    return Ok(PayInvoiceResponse {
+                    return Ok(MakePaymentResponse {
                         payment_lookup_id: payment_hash.to_string(),
-                        payment_preimage: None,
+                        payment_proof: None,
                         status: MeltQuoteState::Unknown,
                         total_spent: Amount::ZERO,
                         unit: self.get_settings().await?.unit,
                     });
                 } else {
-                    return Err(cdk_lightning::Error::UnknownPaymentState);
+                    return Err(cdk_payment::Error::UnknownPaymentState);
                 }
             }
         };
@@ -491,9 +502,9 @@ impl MintLightning for Lnd {
                     let status = update.status();
 
                     let response = match status {
-                        PaymentStatus::Unknown => PayInvoiceResponse {
+                        PaymentStatus::Unknown => MakePaymentResponse {
                             payment_lookup_id: payment_hash.to_string(),
-                            payment_preimage: Some(update.payment_preimage),
+                            payment_proof: Some(update.payment_preimage),
                             status: MeltQuoteState::Unknown,
                             total_spent: Amount::ZERO,
                             unit: self.get_settings().await?.unit,
@@ -502,9 +513,9 @@ impl MintLightning for Lnd {
                             // Continue waiting for the next update
                             continue;
                         }
-                        PaymentStatus::Succeeded => PayInvoiceResponse {
+                        PaymentStatus::Succeeded => MakePaymentResponse {
                             payment_lookup_id: payment_hash.to_string(),
-                            payment_preimage: Some(update.payment_preimage),
+                            payment_proof: Some(update.payment_preimage),
                             status: MeltQuoteState::Paid,
                             total_spent: Amount::from(
                                 (update
@@ -515,9 +526,9 @@ impl MintLightning for Lnd {
                             ),
                             unit: CurrencyUnit::Sat,
                         },
-                        PaymentStatus::Failed => PayInvoiceResponse {
+                        PaymentStatus::Failed => MakePaymentResponse {
                             payment_lookup_id: payment_hash.to_string(),
-                            payment_preimage: Some(update.payment_preimage),
+                            payment_proof: Some(update.payment_preimage),
                             status: MeltQuoteState::Failed,
                             total_spent: Amount::ZERO,
                             unit: self.get_settings().await?.unit,

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use bip39::Mnemonic;
 use cdk::cdk_database::{self, MintDatabase};
-use cdk::cdk_lightning::{self, MintLightning};
+use cdk::cdk_payment::{self, MintPayment};
 use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits};
 use cdk::nuts::{CurrencyUnit, PaymentMethod};
 use cdk::types::QuoteTTL;
@@ -153,7 +153,7 @@ pub async fn create_lnd_backend(lnd_client: &LndClient) -> Result<CdkLnd> {
 pub async fn create_mint<D, L>(addr: &str, port: u16, database: D, lighting: L) -> Result<()>
 where
     D: MintDatabase<Err = cdk_database::Error> + Send + Sync + 'static,
-    L: MintLightning<Err = cdk_lightning::Error> + Send + Sync + 'static,
+    L: MintPayment<Err = cdk_payment::Error> + Send + Sync + 'static,
 {
     let mut mint_builder = MintBuilder::new();
     let localstore = Arc::new(database);

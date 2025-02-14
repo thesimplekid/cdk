@@ -267,7 +267,7 @@ pub enum Error {
     /// Lightning Error
     #[error(transparent)]
     #[cfg(feature = "mint")]
-    Lightning(#[from] crate::lightning::Error),
+    Payment(#[from] crate::payment::Error),
 }
 
 /// CDK Error Response

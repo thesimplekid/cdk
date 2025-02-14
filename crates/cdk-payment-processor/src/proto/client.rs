@@ -4,10 +4,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use cdk_common::lightning::{
-    CreateInvoiceResponse, MintLightning, PayInvoiceResponse, PaymentQuoteResponse, Settings,
+use cdk_common::payment::{
+    CreateIncomingPaymentResponse, MakePaymentResponse as CdkMakePaymentResponse, MintPayment,
+    PaymentQuoteResponse, Settings,
 };
-use cdk_common::{mint, Amount, CurrencyUnit, MeltQuoteBolt11Request, MintQuoteState};
+use cdk_common::{mint, Amount, CurrencyUnit, MeltOptions, MintQuoteState};
 use futures::Stream;
 use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
@@ -58,8 +59,8 @@ impl PaymentProcessorClient {
 }
 
 #[async_trait]
-impl MintLightning for PaymentProcessorClient {
-    type Err = cdk_common::lightning::Error;
+impl MintPayment for PaymentProcessorClient {
+    type Err = cdk_common::payment::Error;
 
     async fn get_settings(&self) -> Result<Settings, Self::Err> {
         let mut inner = self.inner.lock().await;
@@ -68,7 +69,7 @@ impl MintLightning for PaymentProcessorClient {
             .await
             .map_err(|err| {
                 tracing::error!("Could not get settings: {}", err);
-                cdk_common::lightning::Error::Custom(err.to_string())
+                cdk_common::payment::Error::Custom(err.to_string())
             })?;
 
         let settings = response.into_inner();
@@ -81,13 +82,13 @@ impl MintLightning for PaymentProcessorClient {
     }
 
     /// Create a new invoice
-    async fn create_invoice(
+    async fn create_incoming_payment_request(
         &self,
         amount: Amount,
         unit: &CurrencyUnit,
         description: String,
         unix_expiry: u64,
-    ) -> Result<CreateInvoiceResponse, Self::Err> {
+    ) -> Result<CreateIncomingPaymentResponse, Self::Err> {
         let mut inner = self.inner.lock().await;
         let response = inner
             .create_payment(Request::new(CreatePaymentRequest {
@@ -99,27 +100,33 @@ impl MintLightning for PaymentProcessorClient {
             .await
             .map_err(|err| {
                 tracing::error!("Could not create invoice: {}", err);
-                cdk_common::lightning::Error::Custom(err.to_string())
+                cdk_common::payment::Error::Custom(err.to_string())
             })?;
 
         let response = response.into_inner();
 
-        Ok(response.try_into().map_err(|_| {
-            cdk_common::lightning::Error::Anyhow(anyhow!("Could not create invoice"))
-        })?)
+        Ok(response
+            .try_into()
+            .map_err(|_| cdk_common::payment::Error::Anyhow(anyhow!("Could not create invoice")))?)
     }
 
     async fn get_payment_quote(
         &self,
-        melt_quote_request: &MeltQuoteBolt11Request,
+        request: &str,
+        unit: &CurrencyUnit,
+        options: Option<MeltOptions>,
     ) -> Result<PaymentQuoteResponse, Self::Err> {
         let mut inner = self.inner.lock().await;
         let response = inner
-            .get_payment_quote(Request::new(melt_quote_request.into()))
+            .get_payment_quote(Request::new(super::PaymentQuoteRequest {
+                request: request.to_string(),
+                unit: unit.to_string(),
+                options: options.map(|o| o.into()),
+            }))
             .await
             .map_err(|err| {
                 tracing::error!("Could not get payment quote: {}", err);
-                cdk_common::lightning::Error::Custom(err.to_string())
+                cdk_common::payment::Error::Custom(err.to_string())
             })?;
 
         let response = response.into_inner();
@@ -127,12 +134,12 @@ impl MintLightning for PaymentProcessorClient {
         Ok(response.into())
     }
 
-    async fn pay_invoice(
+    async fn make_payment(
         &self,
         melt_quote: mint::MeltQuote,
         partial_amount: Option<Amount>,
         max_fee_amount: Option<Amount>,
-    ) -> Result<PayInvoiceResponse, Self::Err> {
+    ) -> Result<CdkMakePaymentResponse, Self::Err> {
         let mut inner = self.inner.lock().await;
         let response = inner
             .make_payment(Request::new(MakePaymentRequest {
@@ -143,13 +150,13 @@ impl MintLightning for PaymentProcessorClient {
             .await
             .map_err(|err| {
                 tracing::error!("Could not pay invoice: {}", err);
-                cdk_common::lightning::Error::Custom(err.to_string())
+                cdk_common::payment::Error::Custom(err.to_string())
             })?;
 
         let response = response.into_inner();
 
         Ok(response.try_into().map_err(|_err| {
-            cdk_common::lightning::Error::Anyhow(anyhow!("could not make payment"))
+            cdk_common::payment::Error::Anyhow(anyhow!("could not make payment"))
         })?)
     }
 
@@ -170,7 +177,7 @@ impl MintLightning for PaymentProcessorClient {
         todo!()
     }
 
-    async fn check_incoming_invoice_status(
+    async fn check_incoming_payment_status(
         &self,
         request_lookup_id: &str,
     ) -> Result<MintQuoteState, Self::Err> {
@@ -182,7 +189,7 @@ impl MintLightning for PaymentProcessorClient {
             .await
             .map_err(|err| {
                 tracing::error!("Could not check incoming payment: {}", err);
-                cdk_common::lightning::Error::Custom(err.to_string())
+                cdk_common::payment::Error::Custom(err.to_string())
             })?;
 
         let check_incoming = response.into_inner();
@@ -195,7 +202,7 @@ impl MintLightning for PaymentProcessorClient {
     async fn check_outgoing_payment(
         &self,
         request_lookup_id: &str,
-    ) -> Result<PayInvoiceResponse, Self::Err> {
+    ) -> Result<CdkMakePaymentResponse, Self::Err> {
         let mut inner = self.inner.lock().await;
         let response = inner
             .check_outgoing_payment(Request::new(CheckOutgoingPaymentRequest {
@@ -204,13 +211,13 @@ impl MintLightning for PaymentProcessorClient {
             .await
             .map_err(|err| {
                 tracing::error!("Could not check outgoing payment: {}", err);
-                cdk_common::lightning::Error::Custom(err.to_string())
+                cdk_common::payment::Error::Custom(err.to_string())
             })?;
 
         let check_outgoing = response.into_inner();
 
         Ok(check_outgoing
             .try_into()
-            .map_err(|_| cdk_common::lightning::Error::UnknownPaymentState)?)
+            .map_err(|_| cdk_common::payment::Error::UnknownPaymentState)?)
     }
 }

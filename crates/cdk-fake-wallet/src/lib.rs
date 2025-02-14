@@ -15,13 +15,14 @@ use async_trait::async_trait;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::rand::{thread_rng, Rng};
 use bitcoin::secp256k1::{Secp256k1, SecretKey};
-use cdk::amount::{Amount, MSAT_IN_SAT};
-use cdk::cdk_lightning::{
-    self, CreateInvoiceResponse, MintLightning, PayInvoiceResponse, PaymentQuoteResponse, Settings,
+use cdk::amount::{to_unit, Amount};
+use cdk::cdk_payment::{
+    self, CreateIncomingPaymentResponse, MakePaymentResponse, MintPayment, PaymentQuoteResponse,
+    Settings,
 };
 use cdk::mint;
 use cdk::mint::FeeReserve;
-use cdk::nuts::{CurrencyUnit, MeltQuoteBolt11Request, MeltQuoteState, MintQuoteState};
+use cdk::nuts::{CurrencyUnit, MeltOptions, MeltQuoteState, MintQuoteState};
 use cdk::util::unix_time;
 use error::Error;
 use futures::stream::StreamExt;
@@ -96,8 +97,8 @@ impl Default for FakeInvoiceDescription {
 }
 
 #[async_trait]
-impl MintLightning for FakeWallet {
-    type Err = cdk_lightning::Error;
+impl MintPayment for FakeWallet {
+    type Err = cdk_payment::Error;
 
     async fn get_settings(&self) -> Result<Settings, Self::Err> {
         Ok(Settings {
@@ -125,11 +126,21 @@ impl MintLightning for FakeWallet {
 
     async fn get_payment_quote(
         &self,
-        melt_quote_request: &MeltQuoteBolt11Request,
+        request: &str,
+        unit: &CurrencyUnit,
+        options: Option<MeltOptions>,
     ) -> Result<PaymentQuoteResponse, Self::Err> {
-        let amount = melt_quote_request.amount_msat()?;
+        let bolt11 = Bolt11Invoice::from_str(&request)?;
 
-        let amount = amount / MSAT_IN_SAT.into();
+        let amount_msat = match options {
+            Some(amount) => amount.amount_msat(),
+            None => bolt11
+                .amount_milli_satoshis()
+                .ok_or(Error::UnknownInvoiceAmount)?
+                .into(),
+        };
+
+        let amount = to_unit(amount_msat, &CurrencyUnit::Msat, unit)?;
 
         let relative_fee_reserve =
             (self.fee_reserve.percent_fee_reserve * u64::from(amount) as f32) as u64;
@@ -142,19 +153,19 @@ impl MintLightning for FakeWallet {
         };
 
         Ok(PaymentQuoteResponse {
-            request_lookup_id: melt_quote_request.request.payment_hash().to_string(),
+            request_lookup_id: bolt11.payment_hash().to_string(),
             amount,
             fee: fee.into(),
             state: MeltQuoteState::Unpaid,
         })
     }
 
-    async fn pay_invoice(
+    async fn make_payment(
         &self,
         melt_quote: mint::MeltQuote,
         _partial_msats: Option<Amount>,
         _max_fee_msats: Option<Amount>,
-    ) -> Result<PayInvoiceResponse, Self::Err> {
+    ) -> Result<MakePaymentResponse, Self::Err> {
         let bolt11 = Bolt11Invoice::from_str(&melt_quote.request)?;
 
         let payment_hash = bolt11.payment_hash().to_string();
@@ -187,8 +198,8 @@ impl MintLightning for FakeWallet {
             }
         }
 
-        Ok(PayInvoiceResponse {
-            payment_preimage: Some("".to_string()),
+        Ok(MakePaymentResponse {
+            payment_proof: Some("".to_string()),
             payment_lookup_id: payment_hash,
             status: payment_status,
             total_spent: melt_quote.amount,
@@ -196,13 +207,13 @@ impl MintLightning for FakeWallet {
         })
     }
 
-    async fn create_invoice(
+    async fn create_incoming_payment_request(
         &self,
         amount: Amount,
         _unit: &CurrencyUnit,
         description: String,
         unix_expiry: u64,
-    ) -> Result<CreateInvoiceResponse, Self::Err> {
+    ) -> Result<CreateIncomingPaymentResponse, Self::Err> {
         let time_now = unix_time();
         assert!(unix_expiry > time_now);
 
@@ -231,14 +242,14 @@ impl MintLightning for FakeWallet {
 
         let expiry = invoice.expires_at().map(|t| t.as_secs());
 
-        Ok(CreateInvoiceResponse {
+        Ok(CreateIncomingPaymentResponse {
             request_lookup_id: payment_hash.to_string(),
-            request: invoice,
+            request: invoice.to_string(),
             expiry,
         })
     }
 
-    async fn check_incoming_invoice_status(
+    async fn check_incoming_payment_status(
         &self,
         _request_lookup_id: &str,
     ) -> Result<MintQuoteState, Self::Err> {
@@ -248,7 +259,7 @@ impl MintLightning for FakeWallet {
     async fn check_outgoing_payment(
         &self,
         request_lookup_id: &str,
-    ) -> Result<PayInvoiceResponse, Self::Err> {
+    ) -> Result<MakePaymentResponse, Self::Err> {
         // For fake wallet if the state is not explicitly set default to paid
         let states = self.payment_states.lock().await;
         let status = states.get(request_lookup_id).cloned();
@@ -258,11 +269,11 @@ impl MintLightning for FakeWallet {
         let fail_payments = self.failed_payment_check.lock().await;
 
         if fail_payments.contains(request_lookup_id) {
-            return Err(cdk_lightning::Error::InvoicePaymentPending);
+            return Err(cdk_payment::Error::InvoicePaymentPending);
         }
 
-        Ok(PayInvoiceResponse {
-            payment_preimage: Some("".to_string()),
+        Ok(MakePaymentResponse {
+            payment_proof: Some("".to_string()),
             payment_lookup_id: request_lookup_id.to_string(),
             status,
             total_spent: Amount::ZERO,

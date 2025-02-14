@@ -91,7 +91,7 @@ impl Mint {
         }
 
         let create_invoice_response = ln
-            .create_invoice(
+            .create_incoming_payment_request(
                 amount,
                 &unit,
                 description.unwrap_or("".to_string()),

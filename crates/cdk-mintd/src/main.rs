@@ -16,8 +16,7 @@ use axum::response::Response;
 use axum::{middleware, Router};
 use bip39::Mnemonic;
 use cdk::cdk_database::{self, MintDatabase};
-use cdk::cdk_lightning;
-use cdk::cdk_lightning::MintLightning;
+use cdk::cdk_payment::{self, MintPayment};
 use cdk::mint::{MintBuilder, MintMeltLimits};
 use cdk::nuts::nut17::SupportedMethods;
 use cdk::nuts::nut19::{CachedEndpoint, Method as NUT19Method, Path as NUT19Path};
@@ -141,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut ln_backends: HashMap<
         LnKey,
-        Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>,
+        Arc<dyn MintPayment<Err = cdk_payment::Error> + Send + Sync>,
     > = HashMap::new();
     let mut ln_routers = vec![];
 

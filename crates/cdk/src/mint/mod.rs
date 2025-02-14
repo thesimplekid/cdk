@@ -16,7 +16,7 @@ use tokio::task::JoinSet;
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::cdk_lightning::{self, MintLightning};
+use crate::cdk_payment::{self, MintPayment};
 use crate::dhke::{sign_message, verify_message};
 use crate::error::Error;
 use crate::fees::calculate_fee;
@@ -44,7 +44,7 @@ pub struct Mint {
     /// Mint Storage backend
     pub localstore: Arc<dyn MintDatabase<Err = database::Error> + Send + Sync>,
     /// Ln backends for mint
-    pub ln: HashMap<LnKey, Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>>,
+    pub ln: HashMap<LnKey, Arc<dyn MintPayment<Err = cdk_payment::Error> + Send + Sync>>,
     /// Subscription manager
     pub pubsub_manager: Arc<PubSubManager>,
     secp_ctx: Secp256k1<secp256k1::All>,
@@ -59,7 +59,7 @@ impl Mint {
     pub async fn new(
         seed: &[u8],
         localstore: Arc<dyn MintDatabase<Err = database::Error> + Send + Sync>,
-        ln: HashMap<LnKey, Arc<dyn MintLightning<Err = cdk_lightning::Error> + Send + Sync>>,
+        ln: HashMap<LnKey, Arc<dyn MintPayment<Err = cdk_payment::Error> + Send + Sync>>,
         // Hashmap where the key is the unit and value is (input fee ppk, max_order)
         supported_units: HashMap<CurrencyUnit, (u64, u8)>,
         custom_paths: HashMap<CurrencyUnit, DerivationPath>,

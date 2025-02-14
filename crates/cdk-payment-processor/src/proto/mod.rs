@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use cdk_common::lightning::{CreateInvoiceResponse, PayInvoiceResponse, Settings};
+use cdk_common::payment::{
+    CreateIncomingPaymentResponse, MakePaymentResponse as CdkMakePaymentResponse, Settings,
+};
 use cdk_common::{Bolt11Invoice, CurrencyUnit, MeltQuoteBolt11Request};
 use melt_options::Options;
 mod client;
@@ -21,12 +23,12 @@ impl From<Settings> for SettingsResponse {
     }
 }
 
-impl TryFrom<MakePaymentResponse> for PayInvoiceResponse {
+impl TryFrom<MakePaymentResponse> for CdkMakePaymentResponse {
     type Error = crate::error::Error;
     fn try_from(value: MakePaymentResponse) -> Result<Self, Self::Error> {
         Ok(Self {
             payment_lookup_id: value.payment_lookup_id.clone(),
-            payment_preimage: value.payment_proof.clone(),
+            payment_proof: value.payment_proof.clone(),
             status: value.status().as_str_name().parse()?,
             total_spent: value.total_spent.into(),
             unit: value.unit.parse()?,
@@ -34,11 +36,11 @@ impl TryFrom<MakePaymentResponse> for PayInvoiceResponse {
     }
 }
 
-impl From<PayInvoiceResponse> for MakePaymentResponse {
-    fn from(value: PayInvoiceResponse) -> Self {
+impl From<CdkMakePaymentResponse> for MakePaymentResponse {
+    fn from(value: CdkMakePaymentResponse) -> Self {
         Self {
             payment_lookup_id: value.payment_lookup_id.clone(),
-            payment_proof: value.payment_preimage.clone(),
+            payment_proof: value.payment_proof.clone(),
             status: QuoteState::from(value.status).into(),
             total_spent: value.total_spent.into(),
             unit: value.unit.to_string(),
@@ -46,8 +48,8 @@ impl From<PayInvoiceResponse> for MakePaymentResponse {
     }
 }
 
-impl From<CreateInvoiceResponse> for CreatePaymentResponse {
-    fn from(value: CreateInvoiceResponse) -> Self {
+impl From<CreateIncomingPaymentResponse> for CreatePaymentResponse {
+    fn from(value: CreateIncomingPaymentResponse) -> Self {
         Self {
             request_lookup_id: value.request_lookup_id,
             request: value.request.to_string(),
@@ -56,13 +58,13 @@ impl From<CreateInvoiceResponse> for CreatePaymentResponse {
     }
 }
 
-impl TryFrom<CreatePaymentResponse> for CreateInvoiceResponse {
+impl TryFrom<CreatePaymentResponse> for CreateIncomingPaymentResponse {
     type Error = crate::error::Error;
 
     fn try_from(value: CreatePaymentResponse) -> Result<Self, Self::Error> {
         Ok(Self {
             request_lookup_id: value.request_lookup_id,
-            request: value.request.parse()?,
+            request: value.request,
             expiry: value.expiry,
         })
     }
@@ -78,8 +80,8 @@ impl From<&MeltQuoteBolt11Request> for PaymentQuoteRequest {
     }
 }
 
-impl From<cdk_common::lightning::PaymentQuoteResponse> for PaymentQuoteResponse {
-    fn from(value: cdk_common::lightning::PaymentQuoteResponse) -> Self {
+impl From<cdk_common::payment::PaymentQuoteResponse> for PaymentQuoteResponse {
+    fn from(value: cdk_common::payment::PaymentQuoteResponse) -> Self {
         Self {
             request_lookup_id: value.request_lookup_id,
             amount: value.amount.into(),
@@ -116,7 +118,7 @@ impl From<MeltOptions> for cdk_common::nut05::MeltOptions {
     }
 }
 
-impl From<PaymentQuoteResponse> for cdk_common::lightning::PaymentQuoteResponse {
+impl From<PaymentQuoteResponse> for cdk_common::payment::PaymentQuoteResponse {
     fn from(value: PaymentQuoteResponse) -> Self {
         Self {
             request_lookup_id: value.request_lookup_id.clone(),

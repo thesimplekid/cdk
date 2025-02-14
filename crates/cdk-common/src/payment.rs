@@ -3,12 +3,13 @@
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use cashu::MeltOptions;
 use futures::Stream;
-use lightning_invoice::{Bolt11Invoice, ParseOrSemanticError};
+use lightning_invoice::ParseOrSemanticError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nuts::{CurrencyUnit, MeltQuoteBolt11Request, MeltQuoteState, MintQuoteState};
+use crate::nuts::{CurrencyUnit, MeltQuoteState, MintQuoteState};
 use crate::{mint, Amount};
 
 /// CDK Lightning Error
@@ -23,6 +24,9 @@ pub enum Error {
     /// Unsupported unit
     #[error("Unsupported unit")]
     UnsupportedUnit,
+    /// Unsupported payment option
+    #[error("Unsupported payment option")]
+    UnsupportedPaymentOption,
     /// Payment state is unknown
     #[error("Payment state is unknown")]
     UnknownPaymentState,
@@ -52,9 +56,9 @@ pub enum Error {
     Custom(String),
 }
 
-/// MintLighting Trait
+/// Mint payment trait
 #[async_trait]
-pub trait MintLightning {
+pub trait MintPayment {
     /// Mint Lightning Error
     type Err: Into<Error> + From<Error>;
 
@@ -62,28 +66,30 @@ pub trait MintLightning {
     async fn get_settings(&self) -> Result<Settings, Self::Err>;
 
     /// Create a new invoice
-    async fn create_invoice(
+    async fn create_incoming_payment_request(
         &self,
         amount: Amount,
         unit: &CurrencyUnit,
         description: String,
         unix_expiry: u64,
-    ) -> Result<CreateInvoiceResponse, Self::Err>;
+    ) -> Result<CreateIncomingPaymentResponse, Self::Err>;
 
     /// Get payment quote
     /// Used to get fee and amount required for a payment request
     async fn get_payment_quote(
         &self,
-        melt_quote_request: &MeltQuoteBolt11Request,
+        request: &str,
+        unit: &CurrencyUnit,
+        options: Option<MeltOptions>,
     ) -> Result<PaymentQuoteResponse, Self::Err>;
 
-    /// Pay bolt11 invoice
-    async fn pay_invoice(
+    /// Pay request
+    async fn make_payment(
         &self,
         melt_quote: mint::MeltQuote,
         partial_amount: Option<Amount>,
         max_fee_amount: Option<Amount>,
-    ) -> Result<PayInvoiceResponse, Self::Err>;
+    ) -> Result<MakePaymentResponse, Self::Err>;
 
     /// Listen for invoices to be paid to the mint
     /// Returns a stream of request_lookup_id once invoices are paid
@@ -98,7 +104,7 @@ pub trait MintLightning {
     fn cancel_wait_invoice(&self);
 
     /// Check the status of an incoming payment
-    async fn check_incoming_invoice_status(
+    async fn check_incoming_payment_status(
         &self,
         request_lookup_id: &str,
     ) -> Result<MintQuoteState, Self::Err>;
@@ -107,27 +113,27 @@ pub trait MintLightning {
     async fn check_outgoing_payment(
         &self,
         request_lookup_id: &str,
-    ) -> Result<PayInvoiceResponse, Self::Err>;
+    ) -> Result<MakePaymentResponse, Self::Err>;
 }
 
-/// Create invoice response
+/// Create incoming payment response
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CreateInvoiceResponse {
-    /// Id that is used to look up the invoice from the ln backend
+pub struct CreateIncomingPaymentResponse {
+    /// Id that is used to look up the payment from the ln backend
     pub request_lookup_id: String,
-    /// Bolt11 payment request
-    pub request: Bolt11Invoice,
+    /// Payment request
+    pub request: String,
     /// Unix Expiry of Invoice
     pub expiry: Option<u64>,
 }
 
-/// Pay invoice response
+/// Payment response
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PayInvoiceResponse {
+pub struct MakePaymentResponse {
     /// Payment hash
     pub payment_lookup_id: String,
-    /// Payment Preimage
-    pub payment_preimage: Option<String>,
+    /// Payment proof
+    pub payment_proof: Option<String>,
     /// Status
     pub status: MeltQuoteState,
     /// Total Amount Spent
