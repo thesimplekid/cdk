@@ -29,6 +29,7 @@ use cdk_mintd::cli::CLIArgs;
 use cdk_mintd::config::{self, DatabaseEngine, LnBackend};
 use cdk_mintd::env_vars::ENV_WORK_DIR;
 use cdk_mintd::setup::LnBackendSetup;
+use cdk_payment_processor::PaymentProcessorClient;
 use cdk_redb::MintRedbDatabase;
 use cdk_sqlite::MintSqliteDatabase;
 use clap::Parser;
@@ -234,6 +235,34 @@ async fn main() -> anyhow::Result<()> {
                         PaymentMethod::Bolt11,
                         mint_melt_limits,
                         fake.clone(),
+                    )
+                    .await?;
+
+                let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, unit);
+
+                mint_builder = mint_builder.add_supported_websockets(nut17_supported);
+            }
+        }
+        LnBackend::GrpcProcessor => {
+            let grpc_processor = settings
+                .clone()
+                .grpc_processor
+                .expect("grpc defined defined");
+
+            for unit in grpc_processor.supported_units {
+                let payment_processor = PaymentProcessorClient::new(
+                    &grpc_processor.addr,
+                    grpc_processor.port,
+                    grpc_processor.tls_dir.clone(),
+                )
+                .await?;
+
+                mint_builder = mint_builder
+                    .add_ln_backend(
+                        unit.clone(),
+                        PaymentMethod::Bolt11,
+                        mint_melt_limits,
+                        Arc::new(payment_processor),
                     )
                     .await?;
 
