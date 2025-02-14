@@ -5,19 +5,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cdk_common::lightning::MintLightning;
-use cdk_common::proto::cdk_payment_processor_server::CdkPaymentProcessor;
-use cdk_common::{CdkPaymentProcessorServer, CurrencyUnit, MeltQuoteBolt11Request};
+use cdk_common::{CurrencyUnit, MeltQuoteBolt11Request};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tonic::{async_trait, Request, Response, Status};
 
+use super::cdk_payment_processor_server::{CdkPaymentProcessor, CdkPaymentProcessorServer};
 use crate::proto::*;
 
 /// Payment Processor
 #[derive(Clone)]
 pub struct PaymentProcessorServer {
-    inner: Arc<dyn MintLightning<Err = crate::cdk_lightning::Error> + Send + Sync>,
+    inner: Arc<dyn MintLightning<Err = cdk_common::lightning::Error> + Send + Sync>,
     socket_addr: SocketAddr,
     shutdown: Arc<Notify>,
     handle: Option<Arc<JoinHandle<anyhow::Result<()>>>>,

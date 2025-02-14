@@ -3,9 +3,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail};
 use axum::{async_trait, Router};
 use cdk::cdk_lightning::MintLightning;
-use cdk::mint::{FeeReserve, PaymentProcessor};
+use cdk::mint::FeeReserve;
 use cdk::mint_url::MintUrl;
 use cdk::nuts::CurrencyUnit;
+use cdk_payment_processor::PaymentProcessorClient;
 use tokio::sync::Mutex;
 use url::Url;
 
@@ -208,8 +209,8 @@ impl LnBackendSetup for config::FakeWallet {
         _router: &mut Vec<Router>,
         _settings: &Settings,
         _unit: CurrencyUnit,
-    ) -> anyhow::Result<PaymentProcessor> {
-        let fake_wallet = PaymentProcessor::new("127.0.0.1", 8089, None).await?;
+    ) -> anyhow::Result<PaymentProcessorClient> {
+        let fake_wallet = PaymentProcessorClient::new("127.0.0.1", 8089, None).await?;
 
         Ok(fake_wallet)
     }

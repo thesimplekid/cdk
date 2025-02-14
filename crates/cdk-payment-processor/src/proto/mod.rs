@@ -1,9 +1,13 @@
 use std::str::FromStr;
 
-use cashu::{Bolt11Invoice, CurrencyUnit, MeltQuoteBolt11Request};
+use cdk_common::lightning::{CreateInvoiceResponse, PayInvoiceResponse, Settings};
+use cdk_common::{Bolt11Invoice, CurrencyUnit, MeltQuoteBolt11Request};
 use melt_options::Options;
+mod client;
+mod server;
 
-use crate::lightning::{CreateInvoiceResponse, PayInvoiceResponse, Settings};
+pub use client::PaymentProcessorClient;
+pub use server::PaymentProcessorServer;
 
 tonic::include_proto!("cdk_payment_processor");
 
@@ -74,8 +78,8 @@ impl From<&MeltQuoteBolt11Request> for PaymentQuoteRequest {
     }
 }
 
-impl From<crate::lightning::PaymentQuoteResponse> for PaymentQuoteResponse {
-    fn from(value: crate::lightning::PaymentQuoteResponse) -> Self {
+impl From<cdk_common::lightning::PaymentQuoteResponse> for PaymentQuoteResponse {
+    fn from(value: cdk_common::lightning::PaymentQuoteResponse) -> Self {
         Self {
             request_lookup_id: value.request_lookup_id,
             amount: value.amount.into(),
@@ -85,34 +89,34 @@ impl From<crate::lightning::PaymentQuoteResponse> for PaymentQuoteResponse {
     }
 }
 
-impl From<cashu::nut05::MeltOptions> for MeltOptions {
-    fn from(value: cashu::nut05::MeltOptions) -> Self {
+impl From<cdk_common::nut05::MeltOptions> for MeltOptions {
+    fn from(value: cdk_common::nut05::MeltOptions) -> Self {
         Self {
             options: Some(value.into()),
         }
     }
 }
 
-impl From<cashu::nut05::MeltOptions> for Options {
-    fn from(value: cashu::nut05::MeltOptions) -> Self {
+impl From<cdk_common::nut05::MeltOptions> for Options {
+    fn from(value: cdk_common::nut05::MeltOptions) -> Self {
         match value {
-            cashu::MeltOptions::Mpp { mpp } => Self::Mpp(Mpp {
+            cdk_common::MeltOptions::Mpp { mpp } => Self::Mpp(Mpp {
                 amount: mpp.amount.into(),
             }),
         }
     }
 }
 
-impl From<MeltOptions> for cashu::nut05::MeltOptions {
+impl From<MeltOptions> for cdk_common::nut05::MeltOptions {
     fn from(value: MeltOptions) -> Self {
         let options = value.options.expect("option defined");
         match options {
-            Options::Mpp(mpp) => cashu::MeltOptions::new_mpp(mpp.amount),
+            Options::Mpp(mpp) => cdk_common::MeltOptions::new_mpp(mpp.amount),
         }
     }
 }
 
-impl From<PaymentQuoteResponse> for crate::lightning::PaymentQuoteResponse {
+impl From<PaymentQuoteResponse> for cdk_common::lightning::PaymentQuoteResponse {
     fn from(value: PaymentQuoteResponse) -> Self {
         Self {
             request_lookup_id: value.request_lookup_id.clone(),
@@ -123,7 +127,7 @@ impl From<PaymentQuoteResponse> for crate::lightning::PaymentQuoteResponse {
     }
 }
 
-impl From<QuoteState> for cashu::nut05::QuoteState {
+impl From<QuoteState> for cdk_common::nut05::QuoteState {
     fn from(value: QuoteState) -> Self {
         match value {
             QuoteState::Unpaid => Self::Unpaid,
@@ -136,31 +140,31 @@ impl From<QuoteState> for cashu::nut05::QuoteState {
     }
 }
 
-impl From<cashu::nut05::QuoteState> for QuoteState {
-    fn from(value: cashu::nut05::QuoteState) -> Self {
+impl From<cdk_common::nut05::QuoteState> for QuoteState {
+    fn from(value: cdk_common::nut05::QuoteState) -> Self {
         match value {
-            cashu::MeltQuoteState::Unpaid => Self::Unpaid,
-            cashu::MeltQuoteState::Paid => Self::Paid,
-            cashu::MeltQuoteState::Pending => Self::Pending,
-            cashu::MeltQuoteState::Unknown => Self::Unknown,
-            cashu::MeltQuoteState::Failed => Self::Failed,
+            cdk_common::MeltQuoteState::Unpaid => Self::Unpaid,
+            cdk_common::MeltQuoteState::Paid => Self::Paid,
+            cdk_common::MeltQuoteState::Pending => Self::Pending,
+            cdk_common::MeltQuoteState::Unknown => Self::Unknown,
+            cdk_common::MeltQuoteState::Failed => Self::Failed,
         }
     }
 }
 
-impl From<cashu::nut04::QuoteState> for QuoteState {
-    fn from(value: cashu::nut04::QuoteState) -> Self {
+impl From<cdk_common::nut04::QuoteState> for QuoteState {
+    fn from(value: cdk_common::nut04::QuoteState) -> Self {
         match value {
-            cashu::MintQuoteState::Unpaid => Self::Unpaid,
-            cashu::MintQuoteState::Paid => Self::Paid,
-            cashu::MintQuoteState::Pending => Self::Pending,
-            cashu::MintQuoteState::Issued => Self::Issued,
+            cdk_common::MintQuoteState::Unpaid => Self::Unpaid,
+            cdk_common::MintQuoteState::Paid => Self::Paid,
+            cdk_common::MintQuoteState::Pending => Self::Pending,
+            cdk_common::MintQuoteState::Issued => Self::Issued,
         }
     }
 }
 
-impl From<cashu::mint::MeltQuote> for MeltQuote {
-    fn from(value: cashu::mint::MeltQuote) -> Self {
+impl From<cdk_common::mint::MeltQuote> for MeltQuote {
+    fn from(value: cdk_common::mint::MeltQuote) -> Self {
         Self {
             id: value.id.to_string(),
             unit: value.unit.to_string(),
@@ -176,7 +180,7 @@ impl From<cashu::mint::MeltQuote> for MeltQuote {
     }
 }
 
-impl TryFrom<MeltQuote> for cashu::mint::MeltQuote {
+impl TryFrom<MeltQuote> for cdk_common::mint::MeltQuote {
     type Error = crate::error::Error;
 
     fn try_from(value: MeltQuote) -> Result<Self, Self::Error> {
@@ -184,12 +188,12 @@ impl TryFrom<MeltQuote> for cashu::mint::MeltQuote {
             id: value
                 .id
                 .parse()
-                .map_err(|_| crate::error::Error::Internal)?,
+                .map_err(|_| crate::error::Error::InvalidId)?,
             unit: value.unit.parse()?,
             amount: value.amount.into(),
             request: value.request.clone(),
             fee_reserve: value.fee_reserve.into(),
-            state: cashu::nut05::QuoteState::from(value.state()),
+            state: cdk_common::nut05::QuoteState::from(value.state()),
             expiry: value.expiry,
             payment_preimage: value.payment_preimage,
             request_lookup_id: value.request_lookup_id,

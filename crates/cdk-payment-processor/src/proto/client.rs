@@ -7,25 +7,25 @@ use anyhow::anyhow;
 use cdk_common::lightning::{
     CreateInvoiceResponse, MintLightning, PayInvoiceResponse, PaymentQuoteResponse, Settings,
 };
-use cdk_common::proto::{
-    CheckIncomingPaymentRequest, CheckOutgoingPaymentRequest, CreatePaymentRequest,
-    MakePaymentRequest, SettingsRequest,
-};
-use cdk_common::{
-    mint, Amount, CdkPaymentProcessorClient, CurrencyUnit, MeltQuoteBolt11Request, MintQuoteState,
-};
+use cdk_common::{mint, Amount, CurrencyUnit, MeltQuoteBolt11Request, MintQuoteState};
 use futures::Stream;
 use tokio::sync::Mutex;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tonic::{async_trait, Request};
 
+use super::cdk_payment_processor_client::CdkPaymentProcessorClient;
+use super::{
+    CheckIncomingPaymentRequest, CheckOutgoingPaymentRequest, CreatePaymentRequest,
+    MakePaymentRequest, SettingsRequest,
+};
+
 /// Payment Processor
 #[derive(Clone)]
-pub struct PaymentProcessor {
+pub struct PaymentProcessorClient {
     inner: Arc<Mutex<CdkPaymentProcessorClient<Channel>>>,
 }
 
-impl PaymentProcessor {
+impl PaymentProcessorClient {
     /// Payment Processor
     pub async fn new(addr: &str, port: u16, tls_dir: Option<PathBuf>) -> anyhow::Result<Self> {
         let addr = format!("{}:{}", addr, port);
@@ -58,12 +58,18 @@ impl PaymentProcessor {
 }
 
 #[async_trait]
-impl MintLightning for PaymentProcessor {
-    type Err = crate::cdk_lightning::Error;
+impl MintLightning for PaymentProcessorClient {
+    type Err = cdk_common::lightning::Error;
 
     async fn get_settings(&self) -> Result<Settings, Self::Err> {
         let mut inner = self.inner.lock().await;
-        let response = inner.get_settings(Request::new(SettingsRequest {})).await?;
+        let response = inner
+            .get_settings(Request::new(SettingsRequest {}))
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not get settings: {}", err);
+                cdk_common::lightning::Error::Custom(err.to_string())
+            })?;
 
         let settings = response.into_inner();
 
@@ -90,12 +96,16 @@ impl MintLightning for PaymentProcessor {
                 description,
                 unix_expiry: Some(unix_expiry),
             }))
-            .await?;
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not create invoice: {}", err);
+                cdk_common::lightning::Error::Custom(err.to_string())
+            })?;
 
         let response = response.into_inner();
 
         Ok(response.try_into().map_err(|_| {
-            crate::cdk_lightning::Error::Anyhow(anyhow!("Could not create invoice"))
+            cdk_common::lightning::Error::Anyhow(anyhow!("Could not create invoice"))
         })?)
     }
 
@@ -106,7 +116,11 @@ impl MintLightning for PaymentProcessor {
         let mut inner = self.inner.lock().await;
         let response = inner
             .get_payment_quote(Request::new(melt_quote_request.into()))
-            .await?;
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not get payment quote: {}", err);
+                cdk_common::lightning::Error::Custom(err.to_string())
+            })?;
 
         let response = response.into_inner();
 
@@ -126,12 +140,16 @@ impl MintLightning for PaymentProcessor {
                 partial_amount: partial_amount.map(|a| a.into()),
                 max_fee_amount: max_fee_amount.map(|a| a.into()),
             }))
-            .await?;
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not pay invoice: {}", err);
+                cdk_common::lightning::Error::Custom(err.to_string())
+            })?;
 
         let response = response.into_inner();
 
         Ok(response.try_into().map_err(|_err| {
-            crate::cdk_lightning::Error::Anyhow(anyhow!("could not make payment"))
+            cdk_common::lightning::Error::Anyhow(anyhow!("could not make payment"))
         })?)
     }
 
@@ -161,7 +179,11 @@ impl MintLightning for PaymentProcessor {
             .check_incoming_payment(Request::new(CheckIncomingPaymentRequest {
                 request_lookup_id: request_lookup_id.to_string(),
             }))
-            .await?;
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not check incoming payment: {}", err);
+                cdk_common::lightning::Error::Custom(err.to_string())
+            })?;
 
         let check_incoming = response.into_inner();
 
@@ -179,12 +201,16 @@ impl MintLightning for PaymentProcessor {
             .check_outgoing_payment(Request::new(CheckOutgoingPaymentRequest {
                 request_lookup_id: request_lookup_id.to_string(),
             }))
-            .await?;
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not check outgoing payment: {}", err);
+                cdk_common::lightning::Error::Custom(err.to_string())
+            })?;
 
         let check_outgoing = response.into_inner();
 
         Ok(check_outgoing
             .try_into()
-            .map_err(|_| crate::cdk_lightning::Error::UnknownPaymentState)?)
+            .map_err(|_| cdk_common::lightning::Error::UnknownPaymentState)?)
     }
 }

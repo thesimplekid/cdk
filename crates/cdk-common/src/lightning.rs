@@ -47,9 +47,9 @@ pub enum Error {
     /// NUT05 Error
     #[error(transparent)]
     NUT05(#[from] crate::nuts::nut05::Error),
-    /// Tonic
-    #[error(transparent)]
-    Tonic(#[from] tonic::Status),
+    /// Custom
+    #[error("`{0}`")]
+    Custom(String),
 }
 
 /// MintLighting Trait

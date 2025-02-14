@@ -101,6 +101,7 @@ jobs:
             -p cdk-strike,
             -p cdk-lnbits,
             -p cdk-fake-wallet,
+            -p cdk-payment-processor,
             --bin cdk-cli,
             --bin cdk-mintd,
             --bin cdk-mintd --no-default-features --features swagger,
@@ -216,6 +217,7 @@ jobs:
             -p cdk-fake-wallet,
             -p cdk-cln,
             -p cdk-mint-rpc,
+            -p cdk-payment-processor,
           ]
     steps:
       - name: checkout
