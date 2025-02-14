@@ -182,31 +182,6 @@ async fn main() -> anyhow::Result<()> {
 
             mint_builder = mint_builder.add_supported_websockets(nut17_supported);
         }
-        LnBackend::Strike => {
-            let strike_settings = settings.clone().strike.expect("Checked on config load");
-
-            for unit in strike_settings
-                .clone()
-                .supported_units
-                .unwrap_or(vec![CurrencyUnit::Sat])
-            {
-                let strike = strike_settings
-                    .setup(&mut ln_routers, &settings, unit.clone())
-                    .await?;
-
-                mint_builder = mint_builder
-                    .add_ln_backend(
-                        unit.clone(),
-                        PaymentMethod::Bolt11,
-                        mint_melt_limits,
-                        Arc::new(strike),
-                    )
-                    .await?;
-                let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, unit);
-
-                mint_builder = mint_builder.add_supported_websockets(nut17_supported);
-            }
-        }
         LnBackend::LNbits => {
             let lnbits_settings = settings.clone().lnbits.expect("Checked on config load");
             let lnbits = lnbits_settings
@@ -221,25 +196,6 @@ async fn main() -> anyhow::Result<()> {
                     Arc::new(lnbits),
                 )
                 .await?;
-            let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, CurrencyUnit::Sat);
-
-            mint_builder = mint_builder.add_supported_websockets(nut17_supported);
-        }
-        LnBackend::Phoenixd => {
-            let phd_settings = settings.clone().phoenixd.expect("Checked at config load");
-            let phd = phd_settings
-                .setup(&mut ln_routers, &settings, CurrencyUnit::Sat)
-                .await?;
-
-            mint_builder = mint_builder
-                .add_ln_backend(
-                    CurrencyUnit::Sat,
-                    PaymentMethod::Bolt11,
-                    mint_melt_limits,
-                    Arc::new(phd),
-                )
-                .await?;
-
             let nut17_supported = SupportedMethods::new(PaymentMethod::Bolt11, CurrencyUnit::Sat);
 
             mint_builder = mint_builder.add_supported_websockets(nut17_supported);
