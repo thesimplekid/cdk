@@ -9,8 +9,15 @@ repository = "https://github.com/cashubtc/cdk.git"
 rust-version = "1.63.0"                     # MSRV
 license = "MIT"
 
+[[bin]]
+name = "cdk-payment-processor"
+path = "src/bin/payment_processor.rs"
+
 [features]
+default = ["cln", "fake"]
 bench = []
+cln = ["dep:cdk-cln"]
+fake = ["dep:cdk-fake-wallet"]
 
 [dependencies]
 anyhow = "1.0"
@@ -22,9 +29,12 @@ bitcoin = { version = "0.32.2", features = [
     "rand-std",
 ] }
 cdk-common = { path = "../cdk-common", default-features = false, version = "0.7.1", features = ["mint"] }
+cdk-cln = { path = "../cdk-cln", default-features = false, version = "0.7.1", optional = true }
+cdk-fake-wallet = { path = "../cdk-fake-wallet", default-features = false, version = "0.7.1", optional = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 lightning-invoice = { version = "0.32.0", features = ["serde", "std"] }
 uuid = { version = "=1.12.1", features = ["v4", "serde"], optional = true }
 utoipa = { version = "4", optional = true }
@@ -45,6 +55,7 @@ tokio = { version = "1.21", features = [
     "time",
     "macros",
     "sync",
+    "signal"
 ] }
 
 

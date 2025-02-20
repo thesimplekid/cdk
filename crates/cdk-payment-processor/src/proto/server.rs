@@ -23,6 +23,20 @@ pub struct PaymentProcessorServer {
 }
 
 impl PaymentProcessorServer {
+    pub fn new(
+        payment_processor: Arc<dyn MintPayment<Err = cdk_common::payment::Error> + Send + Sync>,
+        addr: &str,
+        port: u16,
+    ) -> anyhow::Result<Self> {
+        let socket_addr = SocketAddr::new(addr.parse()?, port);
+        Ok(Self {
+            inner: payment_processor,
+            socket_addr,
+            shutdown: Arc::new(Notify::new()),
+            handle: None,
+        })
+    }
+
     /// Start fake wallet grpc server
     pub async fn start(&mut self, tls_dir: Option<PathBuf>) -> anyhow::Result<()> {
         tracing::info!("Starting RPC server {}", self.socket_addr);
@@ -81,7 +95,7 @@ impl PaymentProcessorServer {
 
 impl Drop for PaymentProcessorServer {
     fn drop(&mut self) {
-        tracing::debug!("Dropping fake wallet rpc server");
+        tracing::debug!("Dropping payment process server");
         self.shutdown.notify_one();
     }
 }

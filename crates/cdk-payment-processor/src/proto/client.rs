@@ -169,7 +169,7 @@ impl MintPayment for PaymentProcessorClient {
 
     /// Is wait invoice active
     fn is_wait_invoice_active(&self) -> bool {
-        todo!()
+        true
     }
 
     /// Cancel wait invoice

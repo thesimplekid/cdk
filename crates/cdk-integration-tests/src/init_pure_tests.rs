@@ -8,7 +8,7 @@ use bip39::Mnemonic;
 use cdk::amount::SplitTarget;
 use cdk::cdk_database::mint_memory::MintMemoryDatabase;
 use cdk::cdk_database::{MintDatabase, WalletMemoryDatabase};
-use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits};
+use cdk::mint::{MintBuilder, MintMeltLimits};
 use cdk::nuts::nut00::ProofsMethods;
 use cdk::nuts::{
     CheckStateRequest, CheckStateResponse, CurrencyUnit, Id, KeySet, KeysetResponse,
@@ -16,7 +16,7 @@ use cdk::nuts::{
     MintBolt11Response, MintInfo, MintQuoteBolt11Request, MintQuoteBolt11Response, PaymentMethod,
     RestoreRequest, RestoreResponse, SwapRequest, SwapResponse,
 };
-use cdk::types::QuoteTTL;
+use cdk::types::{FeeReserve, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::wallet::client::MintConnector;
 use cdk::wallet::Wallet;

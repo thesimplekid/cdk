@@ -9,7 +9,6 @@ use cdk_common::common::{LnKey, QuoteTTL};
 use cdk_common::database::{self, MintDatabase};
 use cdk_common::mint::MintKeySetInfo;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 use subscription::PubSubManager;
 use tokio::sync::{Notify, RwLock};
 use tokio::task::JoinSet;
@@ -518,15 +517,6 @@ impl Mint {
 
         Ok(total_redeemed)
     }
-}
-
-/// Mint Fee Reserve
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeeReserve {
-    /// Absolute expected min fee
-    pub min_fee_reserve: Amount,
-    /// Percentage expected fee
-    pub percent_fee_reserve: f32,
 }
 
 /// Generate new [`MintKeySetInfo`] from path

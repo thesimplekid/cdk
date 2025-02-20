@@ -4,9 +4,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use bip39::Mnemonic;
 use cdk::cdk_database::{self, MintDatabase};
-use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits};
+use cdk::mint::{MintBuilder, MintMeltLimits};
 use cdk::nuts::{CurrencyUnit, PaymentMethod};
-use cdk::types::QuoteTTL;
+use cdk::types::{FeeReserve, QuoteTTL};
 use cdk_fake_wallet::FakeWallet;
 use tracing_subscriber::EnvFilter;
 

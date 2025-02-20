@@ -221,11 +221,13 @@ async fn main() -> anyhow::Result<()> {
         }
         LnBackend::FakeWallet => {
             let fake_wallet = settings.clone().fake_wallet.expect("Fake wallet defined");
+            tracing::info!("Using fake wallet: {:?}", fake_wallet);
 
             for unit in fake_wallet.clone().supported_units {
                 let fake = fake_wallet
                     .setup(&mut ln_routers, &settings, CurrencyUnit::Sat)
-                    .await?;
+                    .await
+                    .expect("hhh");
 
                 let fake = Arc::new(fake);
 
@@ -249,7 +251,14 @@ async fn main() -> anyhow::Result<()> {
                 .grpc_processor
                 .expect("grpc defined defined");
 
+            tracing::info!(
+                "Attempting to start with grpc payment processor at {}:{}.",
+                grpc_processor.addr,
+                grpc_processor.port
+            );
+
             for unit in grpc_processor.supported_units {
+                tracing::debug!("Adding unit: {:?}", unit);
                 let payment_processor = PaymentProcessorClient::new(
                     &grpc_processor.addr,
                     grpc_processor.port,
@@ -332,8 +341,9 @@ async fn main() -> anyhow::Result<()> {
     let listen_addr = settings.info.listen_host;
     let listen_port = settings.info.listen_port;
 
-    let v1_service =
-        cdk_axum::create_mint_router_with_custom_cache(Arc::clone(&mint), cache).await?;
+    let v1_service = cdk_axum::create_mint_router_with_custom_cache(Arc::clone(&mint), cache)
+        .await
+        .unwrap();
 
     let mut mint_service = Router::new()
         .merge(v1_service)
@@ -408,18 +418,9 @@ async fn main() -> anyhow::Result<()> {
             .parse()?,
     )
     .serve(mint_service.into_make_service())
-    .await;
+    .with_graceful_shutdown(shutdown_signal());
 
-    shutdown.notify_waiters();
-
-    #[cfg(feature = "management-rpc")]
-    {
-        if let Some(rpc_server) = rpc_server {
-            rpc_server.stop().await?;
-        }
-    }
-
-    match axum_result {
+    match axum_result.await {
         Ok(_) => {
             tracing::info!("Axum server stopped with okay status");
         }
@@ -431,7 +432,22 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    shutdown.notify_waiters();
+
+    #[cfg(feature = "management-rpc")]
+    {
+        if let Some(rpc_server) = rpc_server {
+            rpc_server.stop().await?;
+        }
+    }
+
     Ok(())
+}
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install CTRL+C handler");
+    tracing::info!("Shutdown signal received");
 }
 
 /// Logs infos about the request and the response

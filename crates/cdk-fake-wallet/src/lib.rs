@@ -21,8 +21,8 @@ use cdk::cdk_payment::{
     Settings,
 };
 use cdk::mint;
-use cdk::mint::FeeReserve;
 use cdk::nuts::{CurrencyUnit, MeltOptions, MeltQuoteState, MintQuoteState};
+use cdk::types::FeeReserve;
 use cdk::util::unix_time;
 use error::Error;
 use futures::stream::StreamExt;

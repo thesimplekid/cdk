@@ -10,14 +10,14 @@ use cdk::amount::{Amount, SplitTarget};
 use cdk::cdk_database::mint_memory::MintMemoryDatabase;
 use cdk::cdk_database::MintDatabase;
 use cdk::dhke::construct_proofs;
-use cdk::mint::{FeeReserve, MintBuilder, MintMeltLimits, MintQuote};
+use cdk::mint::{MintBuilder, MintMeltLimits, MintQuote};
 use cdk::nuts::nut00::ProofsMethods;
 use cdk::nuts::{
     CurrencyUnit, Id, MintBolt11Request, MintInfo, NotificationPayload, Nuts, PaymentMethod,
     PreMintSecrets, ProofState, Proofs, SecretKey, SpendingConditions, State, SwapRequest,
 };
 use cdk::subscription::{IndexableParams, Params};
-use cdk::types::QuoteTTL;
+use cdk::types::{FeeReserve, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::Mint;
 use cdk_fake_wallet::FakeWallet;

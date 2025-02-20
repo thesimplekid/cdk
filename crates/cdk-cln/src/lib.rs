@@ -15,8 +15,8 @@ use cdk::cdk_payment::{
     self, CreateIncomingPaymentResponse, MakePaymentResponse, MintPayment, PaymentQuoteResponse,
     Settings,
 };
-use cdk::mint::FeeReserve;
 use cdk::nuts::{CurrencyUnit, MeltOptions, MeltQuoteState, MintQuoteState};
+use cdk::types::FeeReserve;
 use cdk::util::{hex, unix_time};
 use cdk::{mint, Bolt11Invoice};
 use cln_rpc::model::requests::{

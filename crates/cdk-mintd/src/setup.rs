@@ -1,12 +1,13 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use axum::{async_trait, Router};
+use bip39::rand::{thread_rng, Rng};
 use cdk::cdk_payment::MintPayment;
-use cdk::mint::FeeReserve;
 use cdk::mint_url::MintUrl;
 use cdk::nuts::CurrencyUnit;
-use cdk_payment_processor::PaymentProcessorClient;
+use cdk::types::FeeReserve;
 use tokio::sync::Mutex;
 
 use crate::config::{self, Settings};
@@ -127,8 +128,22 @@ impl LnBackendSetup for config::FakeWallet {
         _router: &mut Vec<Router>,
         _settings: &Settings,
         _unit: CurrencyUnit,
-    ) -> anyhow::Result<PaymentProcessorClient> {
-        let fake_wallet = PaymentProcessorClient::new("127.0.0.1", 8089, None).await?;
+    ) -> anyhow::Result<cdk_fake_wallet::FakeWallet> {
+        let fee_reserve = FeeReserve {
+            min_fee_reserve: self.reserve_fee_min,
+            percent_fee_reserve: self.fee_percent,
+        };
+
+        // calculate random delay time
+        let mut rng = thread_rng();
+        let delay_time = rng.gen_range(self.min_delay_time..=self.max_delay_time);
+
+        let fake_wallet = cdk_fake_wallet::FakeWallet::new(
+            fee_reserve,
+            HashMap::default(),
+            HashSet::default(),
+            delay_time,
+        );
 
         Ok(fake_wallet)
     }

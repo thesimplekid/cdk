@@ -15,7 +15,8 @@ use cdk::wallet::client::{HttpClient, MintConnector};
 use cdk::wallet::subscription::SubscriptionManager;
 use cdk::wallet::WalletSubscription;
 use cdk::Wallet;
-use tokio::time::{timeout, Duration};
+use tokio::select;
+use tokio::time::{sleep, timeout, Duration};
 
 pub mod init_fake_wallet;
 pub mod init_mint;
@@ -177,9 +178,36 @@ pub async fn wait_for_mint_to_be_paid(
         Ok(())
     };
 
-    // Wait for either the payment to complete or timeout
-    match timeout(Duration::from_secs(timeout_secs), wait_future).await {
-        Ok(result) => result,
-        Err(_) => Err(anyhow::anyhow!("Timeout waiting for mint quote to be paid")),
+    let timeout_future = timeout(Duration::from_secs(timeout_secs), wait_future);
+
+    let check_interval = Duration::from_secs(5);
+
+    let periodic_task = async {
+        loop {
+            match wallet.mint_quote_state(mint_quote_id).await {
+                Ok(result) => {
+                    if result.state == MintQuoteState::Paid {
+                        tracing::info!("mint quote paid via poll");
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Could not check mint quote status: {:?}", e);
+                }
+            }
+            sleep(check_interval).await;
+        }
+    };
+
+    select! {
+        result = timeout_future => {
+            match result {
+                Ok(payment_result) => payment_result,
+                Err(_) => Err(anyhow::anyhow!("Timeout waiting for mint quote to be paid")),
+            }
+        }
+        result = periodic_task => {
+            result // Now propagates the result from periodic checks
+        }
     }
 }
