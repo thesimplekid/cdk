@@ -43,6 +43,10 @@ use utoipa::OpenApi;
 
 const CARGO_PKG_VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 
+// Ensure at least one lightning backend is enabled at compile time
+#[cfg(not(any(feature = "cln", feature = "lnbits", feature = "lnd", feature = "fakewallet")))]
+compile_error!("At least one lightning backend feature must be enabled: cln, lnbits, lnd, or fakewallet");
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let default_filter = "debug";
@@ -156,6 +160,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     match settings.ln.ln_backend {
+        #[cfg(feature = "cln")]
         LnBackend::Cln => {
             let cln_settings = settings
                 .cln
@@ -183,6 +188,7 @@ async fn main() -> anyhow::Result<()> {
 
             mint_builder = mint_builder.add_supported_websockets(nut17_supported);
         }
+        #[cfg(feature = "lnbits")]
         LnBackend::LNbits => {
             let lnbits_settings = settings.clone().lnbits.expect("Checked on config load");
             let lnbits = lnbits_settings
@@ -199,6 +205,7 @@ async fn main() -> anyhow::Result<()> {
 
             mint_builder = mint_builder.add_supported_websockets(nut17_supported);
         }
+        #[cfg(feature = "lnd")]
         LnBackend::Lnd => {
             let lnd_settings = settings.clone().lnd.expect("Checked at config load");
             let lnd = lnd_settings
@@ -216,6 +223,11 @@ async fn main() -> anyhow::Result<()> {
 
             mint_builder = mint_builder.add_supported_websockets(nut17_supported);
         }
+        #[cfg(not(any(feature = "cln", feature = "lnbits", feature = "lnd")))]
+        LnBackend::Cln | LnBackend::LNbits | LnBackend::Lnd | LnBackend::FakeWallet => {
+            bail!("Lightning backend not compiled in. Enable the corresponding feature.");
+        }
+        #[cfg(feature = "fakewallet")]
         LnBackend::FakeWallet => {
             let fake_wallet = settings.clone().fake_wallet.expect("Fake wallet defined");
 

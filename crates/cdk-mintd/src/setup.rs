@@ -24,6 +24,7 @@ pub trait LnBackendSetup {
     ) -> anyhow::Result<impl MintLightning>;
 }
 
+#[cfg(feature = "cln")]
 #[async_trait]
 impl LnBackendSetup for config::Cln {
     async fn setup(
@@ -50,6 +51,7 @@ impl LnBackendSetup for config::Cln {
     }
 }
 
+#[cfg(feature = "lnbits")]
 #[async_trait]
 impl LnBackendSetup for config::LNbits {
     async fn setup(
@@ -93,6 +95,7 @@ impl LnBackendSetup for config::LNbits {
     }
 }
 
+#[cfg(feature = "lnd")]
 #[async_trait]
 impl LnBackendSetup for config::Lnd {
     async fn setup(
@@ -122,6 +125,7 @@ impl LnBackendSetup for config::Lnd {
     }
 }
 
+#[cfg(feature = "fakewallet")]
 #[async_trait]
 impl LnBackendSetup for config::FakeWallet {
     async fn setup(

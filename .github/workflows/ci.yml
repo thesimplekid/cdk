@@ -110,6 +110,10 @@ jobs:
             --bin cdk-mintd --no-default-features --features "redis swagger",
             --bin cdk-mintd --no-default-features --features management-rpc,
             --bin cdk-mintd --no-default-features --features redb,
+            --bin cdk-mintd --no-default-features --features lnd,
+            --bin cdk-mintd --no-default-features --features cln,
+            --bin cdk-mintd --no-default-features --features lnbits,
+            --bin cdk-mintd --no-default-features --features fakewallet,
             --bin cdk-mint-cli,
           ]
     steps:
