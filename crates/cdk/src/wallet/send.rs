@@ -5,7 +5,7 @@ use tracing::instrument;
 use super::SendKind;
 use crate::amount::SplitTarget;
 use crate::nuts::nut00::ProofsMethods;
-use crate::nuts::{Proofs, SpendingConditions, State, Token};
+use crate::nuts::{Proofs, SpendingCondition, State, Token};
 use crate::{Amount, Error, Wallet};
 
 impl Wallet {
@@ -392,7 +392,7 @@ pub struct SendOptions {
     /// Memo
     pub memo: Option<SendMemo>,
     /// Spending conditions
-    pub conditions: Option<SpendingConditions>,
+    pub conditions: Option<Box<dyn SpendingCondition>>,
     /// Amount split target
     pub amount_split_target: SplitTarget,
     /// Send kind

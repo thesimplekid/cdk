@@ -23,8 +23,8 @@ use crate::mint_url::MintUrl;
 use crate::nuts::nut00::token::Token;
 use crate::nuts::nut17::Kind;
 use crate::nuts::{
-    nut10, CurrencyUnit, Id, Keys, MintInfo, MintQuoteState, PreMintSecrets, Proof, Proofs,
-    RestoreRequest, SpendingConditions, State,
+    nut10, nut11, CurrencyUnit, Id, Keys, MintInfo, MintQuoteState, PreMintSecrets, Proof, Proofs,
+    RestoreRequest, SpendingCondition, State,
 };
 use crate::types::ProofInfo;
 use crate::{Amount, HttpClient};
@@ -424,39 +424,12 @@ impl Wallet {
     pub fn verify_token_p2pk(
         &self,
         token: &Token,
-        spending_conditions: SpendingConditions,
+        spending_condition: &dyn SpendingCondition,
     ) -> Result<(), Error> {
-        let (refund_keys, pubkeys, locktime, num_sigs) = match spending_conditions {
-            SpendingConditions::P2PKConditions { data, conditions } => {
-                let mut pubkeys = vec![data];
-
-                match conditions {
-                    Some(conditions) => {
-                        pubkeys.extend(conditions.pubkeys.unwrap_or_default());
-
-                        (
-                            conditions.refund_keys,
-                            Some(pubkeys),
-                            conditions.locktime,
-                            conditions.num_sigs,
-                        )
-                    }
-                    None => (None, Some(pubkeys), None, None),
-                }
-            }
-            SpendingConditions::HTLCConditions {
-                conditions,
-                data: _,
-            } => match conditions {
-                Some(conditions) => (
-                    conditions.refund_keys,
-                    conditions.pubkeys,
-                    conditions.locktime,
-                    conditions.num_sigs,
-                ),
-                None => (None, None, None, None),
-            },
-        };
+        let refund_keys = spending_condition.refund_keys();
+        let pubkeys = spending_condition.pubkeys();
+        let locktime = spending_condition.locktime();
+        let num_sigs = spending_condition.num_sigs();
 
         if refund_keys.is_some() && locktime.is_none() {
             tracing::warn!(
@@ -476,9 +449,8 @@ impl Wallet {
 
         let proofs = token.proofs();
         for proof in proofs {
-            let secret: nut10::Secret = (&proof.secret).try_into()?;
-
-            let proof_conditions: SpendingConditions = secret.try_into()?;
+            // Use the new utility function to get a trait object for the proof
+            let proof_conditions = nut11::condition_from_secret(&proof.secret)?;
 
             if num_sigs.ne(&proof_conditions.num_sigs()) {
                 tracing::debug!(

@@ -15,8 +15,6 @@ use thiserror::Error;
 #[cfg(feature = "wallet")]
 use super::nut10;
 #[cfg(feature = "wallet")]
-use super::nut11::SpendingConditions;
-#[cfg(feature = "wallet")]
 use crate::amount::SplitTarget;
 #[cfg(feature = "wallet")]
 use crate::dhke::blind_message;
@@ -24,7 +22,7 @@ use crate::dhke::hash_to_curve;
 use crate::nuts::nut01::PublicKey;
 #[cfg(feature = "wallet")]
 use crate::nuts::nut01::SecretKey;
-use crate::nuts::nut11::{serde_p2pk_witness, P2PKWitness};
+use crate::nuts::nut11::{serde_p2pk_witness, to_nut10_secret, P2PKWitness, SpendingCondition};
 use crate::nuts::nut12::BlindSignatureDleq;
 use crate::nuts::nut14::{serde_htlc_witness, HTLCWitness};
 use crate::nuts::{Id, ProofDleq};
@@ -695,18 +693,22 @@ impl PreMintSecrets {
     }
 
     /// Outputs with specific spending conditions
-    pub fn with_conditions(
+    pub fn with_conditions<T>(
         keyset_id: Id,
         amount: Amount,
         amount_split_target: &SplitTarget,
-        conditions: &SpendingConditions,
-    ) -> Result<Self, Error> {
+        conditions: &T,
+    ) -> Result<Self, Error>
+    where
+        T: SpendingCondition,
+    {
         let amount_split = amount.split_targeted(amount_split_target)?;
 
         let mut output = Vec::with_capacity(amount_split.len());
 
         for amount in amount_split {
-            let secret: nut10::Secret = conditions.clone().into();
+            // Convert the condition to a nut10 secret using our utility function
+            let secret: nut10::Secret = to_nut10_secret(conditions);
 
             let secret: Secret = secret.try_into()?;
             let (blinded, r) = blind_message(&secret.to_bytes(), None)?;

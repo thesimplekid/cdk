@@ -1,8 +1,12 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use cdk::amount::SplitTarget;
 use cdk::error::Error;
-use cdk::nuts::{CurrencyUnit, MintQuoteState, NotificationPayload, SecretKey, SpendingConditions};
+use cdk::nuts::{
+    CurrencyUnit, HTLCCondition, Id, MintQuoteState, NotificationPayload, P2PKCondition, SecretKey, 
+    SpendingCondition,
+};
 use cdk::wallet::{SendOptions, Wallet, WalletSubscription};
 use cdk::Amount;
 use cdk_sqlite::wallet::memory;
@@ -68,8 +72,11 @@ async fn main() -> Result<(), Error> {
     // Generate a secret key for spending conditions
     let secret = SecretKey::generate();
 
-    // Create spending conditions using the generated public key
-    let spending_conditions = SpendingConditions::new_p2pk(secret.public_key(), None);
+    // Create spending conditions using the generated public key (trait-based approach)
+    let p2pk_condition = P2PKCondition::new(secret.public_key(), None);
+    
+    // Use the trait-based condition directly
+    let condition: Box<dyn SpendingCondition> = Box::new(p2pk_condition.clone());
 
     // Get the total balance of the wallet
     let bal = wallet.total_balance().await?;
@@ -80,7 +87,7 @@ async fn main() -> Result<(), Error> {
         .prepare_send(
             10.into(),
             SendOptions {
-                conditions: Some(spending_conditions),
+                conditions: Some(condition),
                 include_fee: true,
                 ..Default::default()
             },
@@ -98,6 +105,56 @@ async fn main() -> Result<(), Error> {
         .await?;
 
     println!("Redeemed locked token worth: {}", u64::from(amount));
+    
+    // Example of using the trait for generic programming
+    println!("\nExample of trait-based usage:");
+    print_condition_info(&p2pk_condition);
+    
+    // Create an HTLC condition
+    if let Ok(htlc_condition) = cdk::nuts::HTLCCondition::new("deadbeef".into(), None) {
+        print_condition_info(&htlc_condition);
+    }
+    
+    // Example of dynamic dispatch with Box<dyn SpendingCondition>
+    println!("\nExample of dynamic dispatch with trait objects:");
+    let conditions: Vec<Box<dyn SpendingCondition>> = vec![
+        Box::new(p2pk_condition.clone()), // P2PK condition created earlier
+        // Create a new HTLC condition directly
+        Box::new(HTLCCondition::new("deadbeef".into(), None).unwrap()),
+    ];
+    
+    // Example of using PreMintSecrets::with_conditions with trait objects
+    println!("\nExample of using with_conditions with the trait:");
+    // The method now takes any type that implements SpendingCondition
+    if let Ok(pre_mint) = cdk::nuts::PreMintSecrets::with_conditions(
+        cdk::nuts::Id::from_str("deadbeef").unwrap(), 
+        Amount::from(1000),
+        &cdk::amount::SplitTarget::default(),
+        &p2pk_condition // Pass the condition directly, no need for enum conversion
+    ) {
+        println!("Successfully created pre-mint secrets with trait object");
+        println!("Number of pre-mint entries: {}", pre_mint.len());
+    }
+    
+    for (i, condition) in conditions.iter().enumerate() {
+        println!("Condition #{}", i + 1);
+        println!("Kind: {:?}", condition.kind());
+        println!("Num sigs: {:?}", condition.num_sigs());
+        println!();
+    }
 
     Ok(())
+}
+
+// This function can work with any type that implements SpendingCondition
+fn print_condition_info<T: SpendingCondition + std::fmt::Debug>(condition: &T) {
+    println!("Condition type: {:?}", condition.kind());
+    println!("Required signatures: {:?}", condition.num_sigs());
+    if let Some(pubkeys) = condition.pubkeys() {
+        println!("Associated public keys: {}", pubkeys.len());
+    }
+    if let Some(locktime) = condition.locktime() {
+        println!("Locktime: {}", locktime);
+    }
+    println!();
 }

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use crate::mint_url::MintUrl;
 use crate::nuts::nut00::ProofsMethods;
+use crate::nuts::nut11::{condition_from_secret, Kind};
 use crate::nuts::{
-    CurrencyUnit, MeltQuoteState, PaymentMethod, Proof, Proofs, PublicKey, SpendingConditions,
-    State,
+    CurrencyUnit, MeltQuoteState, PaymentMethod, Proof, Proofs, PublicKey, SpendingCondition, State,
 };
 use crate::Amount;
 
@@ -61,7 +61,7 @@ impl Melted {
 }
 
 /// Prooinfo
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofInfo {
     /// Proof
     pub proof: Proof,
@@ -71,8 +71,11 @@ pub struct ProofInfo {
     pub mint_url: MintUrl,
     /// Proof State
     pub state: State,
-    /// Proof Spending Conditions
-    pub spending_condition: Option<SpendingConditions>,
+    /// Proof Spending Conditions - Use Box<dyn SpendingCondition>
+    #[serde(skip)]
+    pub spending_condition: Option<Box<impl SpendingCondition>>,
+    /// The kind of spending condition (P2PK or HTLC)
+    pub condition_kind: Option<Kind>,
     /// Unit
     pub unit: CurrencyUnit,
 }
@@ -87,7 +90,11 @@ impl ProofInfo {
     ) -> Result<Self, Error> {
         let y = proof.y()?;
 
-        let spending_condition: Option<SpendingConditions> = (&proof.secret).try_into().ok();
+        // Use condition_from_secret to get the appropriate SpendingCondition trait object
+        let spending_condition = condition_from_secret(&proof.secret).ok();
+
+        // Store the kind separately for serialization
+        let condition_kind = spending_condition.as_ref().map(|c| c.kind());
 
         Ok(Self {
             proof,
@@ -95,6 +102,7 @@ impl ProofInfo {
             mint_url,
             state,
             spending_condition,
+            condition_kind,
             unit,
         })
     }
@@ -105,7 +113,7 @@ impl ProofInfo {
         mint_url: &Option<MintUrl>,
         unit: &Option<CurrencyUnit>,
         state: &Option<Vec<State>>,
-        spending_conditions: &Option<Vec<SpendingConditions>>,
+        condition_kinds: &Option<Vec<Kind>>,
     ) -> bool {
         if let Some(mint_url) = mint_url {
             if mint_url.ne(&self.mint_url) {
@@ -125,15 +133,15 @@ impl ProofInfo {
             }
         }
 
-        if let Some(spending_conditions) = spending_conditions {
-            match &self.spending_condition {
+        if let Some(condition_kinds) = condition_kinds {
+            match &self.condition_kind {
                 None => {
-                    if !spending_conditions.is_empty() {
+                    if !condition_kinds.is_empty() {
                         return false;
                     }
                 }
-                Some(s) => {
-                    if !spending_conditions.contains(s) {
+                Some(kind) => {
+                    if !condition_kinds.contains(kind) {
                         return false;
                     }
                 }
@@ -141,6 +149,18 @@ impl ProofInfo {
         }
 
         true
+    }
+}
+
+// Custom implementation of Hash that works with the trait objects
+impl std::hash::Hash for ProofInfo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.proof.hash(state);
+        self.y.hash(state);
+        self.mint_url.hash(state);
+        self.state.hash(state);
+        self.condition_kind.hash(state);
+        self.unit.hash(state);
     }
 }
 
@@ -181,11 +201,12 @@ impl QuoteTTL {
 mod tests {
     use std::str::FromStr;
 
+    use cashu::nuts::nut11::Kind;
     use cashu::SecretKey;
 
     use super::{Melted, ProofInfo};
     use crate::mint_url::MintUrl;
-    use crate::nuts::{CurrencyUnit, Id, Proof, PublicKey, SpendingConditions, State};
+    use crate::nuts::{CurrencyUnit, Id, Proof, PublicKey, State};
     use crate::secret::Secret;
     use crate::Amount;
 
@@ -302,10 +323,7 @@ mod tests {
 
     #[test]
     fn test_matches_conditions_with_spending_conditions() {
-        // This test would need to be expanded with actual SpendingConditions
-        // implementation, but we can test the basic case where no spending
-        // conditions are present
-
+        // This test uses the Kind enum instead of SpendingConditions
         let keyset_id = Id::from_str("00deadbeef123456").unwrap();
         let proof = Proof::new(
             Amount::from(64),
@@ -321,15 +339,11 @@ mod tests {
         let proof_info =
             ProofInfo::new(proof, mint_url, State::Unspent, CurrencyUnit::Sat).unwrap();
 
-        // Test with empty spending conditions (should match when proof has none)
+        // Test with empty condition kinds (should match when proof has none)
         assert!(proof_info.matches_conditions(&None, &None, &None, &Some(vec![])));
 
-        // Test with non-empty spending conditions (should not match when proof has none)
-        let dummy_condition = SpendingConditions::P2PKConditions {
-            data: SecretKey::generate().public_key(),
-            conditions: None,
-        };
-        assert!(!proof_info.matches_conditions(&None, &None, &None, &Some(vec![dummy_condition])));
+        // Test with non-empty condition kinds (should not match when proof has none)
+        assert!(!proof_info.matches_conditions(&None, &None, &None, &Some(vec![Kind::P2PK])));
     }
 }
 
