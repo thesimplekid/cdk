@@ -9,7 +9,7 @@ use super::PublicKey;
 use crate::nuts::{
     CurrencyUnit, MeltQuoteBolt11Response, MintQuoteBolt11Response, PaymentMethod, ProofState,
 };
-use crate::MintQuoteBolt12Response;
+use crate::{MintQuoteBolt12Response, MintQuoteEhashResponse};
 
 pub mod ws;
 
@@ -85,6 +85,17 @@ impl SupportedMethods {
             commands,
         }
     }
+
+    /// Create [`SupportedMethods`] for Ehash with all supported commands
+    pub fn default_ehash(unit: CurrencyUnit) -> Self {
+        let commands = vec![WsCommand::EhashMintQuote, WsCommand::ProofState];
+
+        Self {
+            method: PaymentMethod::Ehash,
+            unit,
+            commands,
+        }
+    }
 }
 
 /// WebSocket commands supported by the Cashu mint
@@ -104,6 +115,9 @@ pub enum WsCommand {
     /// Websocket support for Bolt12 Melt Quote
     #[serde(rename = "bolt12_melt_quote")]
     Bolt12MeltQuote,
+    /// Websocket support for Ehash Mint Quote
+    #[serde(rename = "ehash_mint_quote")]
+    EhashMintQuote,
     /// Command to check the state of a proof
     #[serde(rename = "proof_state")]
     ProofState,
@@ -128,6 +142,8 @@ pub enum NotificationPayload<T> {
     MintQuoteBolt11Response(MintQuoteBolt11Response<T>),
     /// Mint Quote Bolt12 Response
     MintQuoteBolt12Response(MintQuoteBolt12Response<T>),
+    /// Mint Quote Ehash Response
+    MintQuoteEhashResponse(MintQuoteEhashResponse<T>),
 }
 
 impl<T> From<ProofState> for NotificationPayload<T> {
@@ -148,6 +164,12 @@ impl<T> From<MintQuoteBolt11Response<T>> for NotificationPayload<T> {
     }
 }
 
+impl<T> From<MintQuoteEhashResponse<T>> for NotificationPayload<T> {
+    fn from(mint_quote: MintQuoteEhashResponse<T>) -> NotificationPayload<T> {
+        NotificationPayload::MintQuoteEhashResponse(mint_quote)
+    }
+}
+
 #[cfg(feature = "mint")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A parsed notification
@@ -161,6 +183,8 @@ pub enum Notification {
     /// MintQuote id is an Uuid
     MintQuoteBolt12(Uuid),
     /// MintQuote id is an Uuid
+    MintQuoteEhash(Uuid),
+    /// MintQuote id is an Uuid
     MeltQuoteBolt12(Uuid),
 }
 
@@ -172,6 +196,8 @@ pub enum Kind {
     Bolt11MeltQuote,
     /// Bolt 11 Mint Quote
     Bolt11MintQuote,
+    /// Ehash Mint Quote
+    EhashMintQuote,
     /// Proof State
     ProofState,
 }

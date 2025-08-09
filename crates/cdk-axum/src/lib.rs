@@ -21,6 +21,7 @@ use router_handlers::*;
 mod auth;
 mod bolt12_router;
 pub mod cache;
+mod ehash_router;
 mod router_handlers;
 mod ws;
 
@@ -47,6 +48,7 @@ mod swagger_imports {
         MeltQuoteBolt11Request, MeltQuoteBolt11Response, MintQuoteBolt11Request,
         MintQuoteBolt11Response,
     };
+    pub use cdk::nuts::nut25::{MintQuoteEhashRequest, MintQuoteEhashResponse};
     #[cfg(feature = "auth")]
     pub use cdk::nuts::MintAuthRequest;
     pub use cdk::nuts::{nut04, nut05, nut15, MeltQuoteState, MintQuoteState};
@@ -58,6 +60,10 @@ use swagger_imports::*;
 use crate::bolt12_router::{
     cache_post_melt_bolt12, cache_post_mint_bolt12, get_check_mint_bolt12_quote,
     post_melt_bolt12_quote, post_mint_bolt12_quote,
+};
+use crate::ehash_router::{
+    cache_post_mint_ehash, get_check_mint_ehash_quote, post_mint_ehash_quote,
+    post_submit_ehash_solution,
 };
 
 /// CDK Mint State
@@ -135,6 +141,8 @@ define_api_doc! {
         MintInfo,
         MintQuoteBolt11Request,
         MintQuoteBolt11Response<String>,
+        MintQuoteEhashRequest,
+        MintQuoteEhashResponse<String>,
         MintQuoteState,
         MintMethodSettings,
         MintVersion,
@@ -191,6 +199,8 @@ define_api_doc! {
         MintInfo,
         MintQuoteBolt11Request,
         MintQuoteBolt11Response<String>,
+        MintQuoteEhashRequest,
+        MintQuoteEhashResponse<String>,
         MintQuoteState,
         MintMethodSettings,
         MintVersion,
@@ -224,8 +234,13 @@ define_api_doc! {
 }
 
 /// Create mint [`Router`] with required endpoints for cashu mint with the default cache
-pub async fn create_mint_router(mint: Arc<Mint>, include_bolt12: bool) -> Result<Router> {
-    create_mint_router_with_custom_cache(mint, Default::default(), include_bolt12).await
+pub async fn create_mint_router(
+    mint: Arc<Mint>,
+    include_bolt12: bool,
+    include_ehash: bool,
+) -> Result<Router> {
+    create_mint_router_with_custom_cache(mint, Default::default(), include_bolt12, include_ehash)
+        .await
 }
 
 async fn cors_middleware(
@@ -278,6 +293,7 @@ pub async fn create_mint_router_with_custom_cache(
     mint: Arc<Mint>,
     cache: HttpCache,
     include_bolt12: bool,
+    include_ehash: bool,
 ) -> Result<Router> {
     let state = MintState {
         mint,
@@ -322,6 +338,14 @@ pub async fn create_mint_router_with_custom_cache(
         mint_router
     };
 
+    // Conditionally create and merge ehash_router
+    let mint_router = if include_ehash {
+        let ehash_router = create_ehash_router(state.clone());
+        mint_router.nest("/v1", ehash_router)
+    } else {
+        mint_router
+    };
+
     let mint_router = mint_router
         .layer(from_fn(cors_middleware))
         .with_state(state);
@@ -343,5 +367,17 @@ fn create_bolt12_router(state: MintState) -> Router<MintState> {
             get(get_check_mint_bolt12_quote),
         )
         .route("/mint/bolt12", post(cache_post_mint_bolt12))
+        .with_state(state)
+}
+
+fn create_ehash_router(state: MintState) -> Router<MintState> {
+    Router::new()
+        .route("/mint/quote/ehash", post(post_mint_ehash_quote))
+        .route(
+            "/mint/quote/ehash/{quote_id}",
+            get(get_check_mint_ehash_quote),
+        )
+        .route("/mint/ehash", post(cache_post_mint_ehash))
+        .route("/ehash/submit/{quote_id}", post(post_submit_ehash_solution))
         .with_state(state)
 }

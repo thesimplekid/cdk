@@ -693,9 +693,13 @@ async fn start_services_with_shutdown(
     let bolt12_supported = nut04_methods.contains(&&PaymentMethod::Bolt12)
         || nut05_methods.contains(&&PaymentMethod::Bolt12);
 
-    let v1_service =
-        cdk_axum::create_mint_router_with_custom_cache(Arc::clone(&mint), cache, bolt12_supported)
-            .await?;
+    let v1_service = cdk_axum::create_mint_router_with_custom_cache(
+        Arc::clone(&mint),
+        cache,
+        bolt12_supported,
+        true,
+    )
+    .await?;
 
     let mut mint_service = Router::new()
         .merge(v1_service)

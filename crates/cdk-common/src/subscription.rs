@@ -50,6 +50,7 @@ impl TryFrom<IndexableParams> for Vec<Index<Notification>> {
                     Kind::Bolt11MintQuote => {
                         Notification::MintQuoteBolt11(Uuid::from_str(&filter)?)
                     }
+                    Kind::EhashMintQuote => Notification::MintQuoteEhash(Uuid::from_str(&filter)?),
                     Kind::ProofState => Notification::ProofState(PublicKey::from_str(&filter)?),
                 };
 
@@ -83,6 +84,9 @@ impl Indexable for NotificationPayload<Uuid> {
             }
             NotificationPayload::MintQuoteBolt12Response(mint_quote) => {
                 vec![Index::from(Notification::MintQuoteBolt12(mint_quote.quote))]
+            }
+            NotificationPayload::MintQuoteEhashResponse(mint_quote) => {
+                vec![Index::from(Notification::MintQuoteEhash(mint_quote.quote))]
             }
         }
     }

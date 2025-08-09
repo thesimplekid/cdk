@@ -63,6 +63,9 @@ pub fn notification_uuid_to_notification_string(
             NotificationPayload::MintQuoteBolt12Response(quote) => {
                 NotificationPayload::MintQuoteBolt12Response(quote.to_string_id())
             }
+            NotificationPayload::MintQuoteEhashResponse(quote) => {
+                NotificationPayload::MintQuoteEhashResponse(quote.to_string_id())
+            }
         },
     }
 }

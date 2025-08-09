@@ -6,8 +6,9 @@ use cdk_common::payment::{
 use cdk_common::util::unix_time;
 use cdk_common::{
     database, ensure_cdk, Amount, CurrencyUnit, Error, MintQuoteBolt11Request,
-    MintQuoteBolt11Response, MintQuoteBolt12Request, MintQuoteBolt12Response, MintQuoteState,
-    MintRequest, MintResponse, NotificationPayload, PaymentMethod, PublicKey,
+    MintQuoteBolt11Response, MintQuoteBolt12Request, MintQuoteBolt12Response,
+    MintQuoteEhashRequest, MintQuoteEhashResponse, MintQuoteState, MintRequest, MintResponse,
+    NotificationPayload, PaymentMethod, PublicKey,
 };
 use tracing::instrument;
 use uuid::Uuid;
@@ -28,6 +29,9 @@ pub enum MintQuoteRequest {
     Bolt11(MintQuoteBolt11Request),
     /// Lightning Network BOLT12 offer request
     Bolt12(MintQuoteBolt12Request),
+    Ehash {
+        nonce: String,
+    },
 }
 
 impl From<MintQuoteBolt11Request> for MintQuoteRequest {
@@ -42,6 +46,14 @@ impl From<MintQuoteBolt12Request> for MintQuoteRequest {
     }
 }
 
+impl From<MintQuoteEhashRequest> for MintQuoteRequest {
+    fn from(request: MintQuoteEhashRequest) -> Self {
+        MintQuoteRequest::Ehash {
+            nonce: request.nonce,
+        }
+    }
+}
+
 /// Response for a mint quote request
 ///
 /// This enum represents the different types of payment responses that can be returned
@@ -52,6 +64,8 @@ pub enum MintQuoteResponse {
     Bolt11(MintQuoteBolt11Response<Uuid>),
     /// Lightning Network BOLT12 offer response
     Bolt12(MintQuoteBolt12Response<Uuid>),
+    /// Hash-based payment response
+    Ehash(MintQuoteEhashResponse<Uuid>),
 }
 
 impl TryFrom<MintQuoteResponse> for MintQuoteBolt11Response<Uuid> {
@@ -76,6 +90,17 @@ impl TryFrom<MintQuoteResponse> for MintQuoteBolt12Response<Uuid> {
     }
 }
 
+impl TryFrom<MintQuoteResponse> for MintQuoteEhashResponse<Uuid> {
+    type Error = Error;
+
+    fn try_from(response: MintQuoteResponse) -> Result<Self, Self::Error> {
+        match response {
+            MintQuoteResponse::Ehash(ehash_response) => Ok(ehash_response),
+            _ => Err(Error::InvalidPaymentMethod),
+        }
+    }
+}
+
 impl TryFrom<MintQuote> for MintQuoteResponse {
     type Error = Error;
 
@@ -88,6 +113,10 @@ impl TryFrom<MintQuote> for MintQuoteResponse {
             PaymentMethod::Bolt12 => {
                 let bolt12_response = MintQuoteBolt12Response::try_from(quote)?;
                 Ok(MintQuoteResponse::Bolt12(bolt12_response))
+            }
+            PaymentMethod::Ehash => {
+                let ehash_response: MintQuoteEhashResponse<Uuid> = quote.into();
+                Ok(MintQuoteResponse::Ehash(ehash_response))
             }
             PaymentMethod::Custom(_) => Err(Error::InvalidPaymentMethod),
         }
@@ -192,7 +221,7 @@ impl Mint {
         let pubkey;
         let payment_method;
 
-        let create_invoice_response = match mint_quote_request {
+        let create_invoice_response = match mint_quote_request.clone() {
             MintQuoteRequest::Bolt11(bolt11_request) => {
                 unit = bolt11_request.unit;
                 amount = Some(bolt11_request.amount);
@@ -269,6 +298,31 @@ impl Mint {
                         Error::InvalidPaymentRequest
                     })?
             }
+            MintQuoteRequest::Ehash { nonce } => {
+                // For Ehash, we create a simple hash challenge based on the nonce
+                unit = CurrencyUnit::Ehash; // Default to sat for Ehash
+                amount = Some(Amount::from(1));
+                pubkey = None;
+                payment_method = PaymentMethod::Ehash;
+
+                // TODO Veruify nonce
+
+                // TODO: send nonce to pool
+
+                // For Ehash, we create a dummy response since it doesn't use traditional payment processors
+                cdk_common::payment::CreateIncomingPaymentResponse {
+                    request: "".to_lowercase(),
+                    expiry: None,
+                    request_lookup_id: cdk_common::payment::PaymentIdentifier::CustomId(
+                        Uuid::new_v4().to_string(),
+                    ), // Dummy payment identifier
+                }
+            }
+        };
+
+        let amount_paid = match mint_quote_request {
+            MintQuoteRequest::Ehash { nonce: _ } => Amount::from(1),
+            _ => Amount::ZERO,
         };
 
         let quote = MintQuote::new(
@@ -279,7 +333,7 @@ impl Mint {
             create_invoice_response.expiry.unwrap_or(0),
             create_invoice_response.request_lookup_id.clone(),
             pubkey,
-            Amount::ZERO,
+            amount_paid,
             Amount::ZERO,
             payment_method.clone(),
             unix_time(),
@@ -310,6 +364,11 @@ impl Mint {
                 let res: MintQuoteBolt12Response<Uuid> = quote.clone().try_into()?;
                 self.pubsub_manager
                     .broadcast(NotificationPayload::MintQuoteBolt12Response(res));
+            }
+            PaymentMethod::Ehash => {
+                let res: MintQuoteEhashResponse<Uuid> = quote.clone().into();
+                self.pubsub_manager
+                    .broadcast(NotificationPayload::MintQuoteEhashResponse(res));
             }
             PaymentMethod::Custom(_) => {}
         }
@@ -536,6 +595,15 @@ impl Mint {
                     return Err(Error::UnpaidQuote);
                 }
                 mint_quote.amount_paid() - mint_quote.amount_issued()
+            }
+            PaymentMethod::Ehash => {
+                // For Ehash, we use the amount paid or fall back to the total requested amount
+                if mint_quote.amount_paid() > Amount::ZERO {
+                    mint_quote.amount_paid() - mint_quote.amount_issued()
+                } else {
+                    // If no specific amount paid, use the total amount of the mint request
+                    mint_request.total_amount()?
+                }
             }
             _ => return Err(Error::UnsupportedPaymentMethod),
         };

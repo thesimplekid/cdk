@@ -4,7 +4,7 @@ use bitcoin::bip32::DerivationPath;
 use cashu::util::unix_time;
 use cashu::{
     Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
-    MintQuoteBolt12Response, PaymentMethod,
+    MintQuoteBolt12Response, MintQuoteEhashResponse, PaymentMethod,
 };
 use lightning::offers::offer::Offer;
 use serde::{Deserialize, Serialize};
@@ -382,6 +382,29 @@ impl TryFrom<MintQuote> for MintQuoteBolt12Response<String> {
         let quote: MintQuoteBolt12Response<Uuid> = quote.try_into()?;
 
         Ok(quote.into())
+    }
+}
+
+impl From<MintQuote> for MintQuoteEhashResponse<Uuid> {
+    fn from(mint_quote: crate::mint::MintQuote) -> MintQuoteEhashResponse<Uuid> {
+        let challenge = mint_quote.request.clone();
+        MintQuoteEhashResponse {
+            quote: mint_quote.id,
+            challenge,
+            state: mint_quote.state(),
+            expiry: Some(mint_quote.expiry),
+            nonce: "".to_string(), // Nonce would be extracted from request or stored separately
+            amount: mint_quote.amount,
+            unit: mint_quote.unit,
+        }
+    }
+}
+
+impl From<MintQuote> for MintQuoteEhashResponse<String> {
+    fn from(quote: MintQuote) -> Self {
+        let quote: MintQuoteEhashResponse<Uuid> = quote.into();
+
+        quote.into()
     }
 }
 

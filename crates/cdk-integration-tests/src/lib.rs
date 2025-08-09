@@ -167,6 +167,20 @@ pub async fn wait_for_mint_to_be_paid(
                         }
                     }
                 }
+                PaymentMethod::Ehash => {
+                    // For Ehash, check the quote state similar to Bolt11
+                    match wallet.mint_quote_state(mint_quote_id).await {
+                        Ok(result) => {
+                            if result.state == MintQuoteState::Paid {
+                                tracing::info!("ehash mint quote paid via poll");
+                                return Ok(());
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Could not check ehash mint quote status: {:?}", e);
+                        }
+                    }
+                }
                 PaymentMethod::Custom(_) => (),
             }
             sleep(check_interval).await;
