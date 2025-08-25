@@ -5,7 +5,6 @@ use axum::routing::{get, post};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
 
 use crate::web::handlers::{
     balance_page, channels_page, close_channel_page, dashboard, force_close_channel_page,

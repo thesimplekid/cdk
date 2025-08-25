@@ -45,7 +45,7 @@ use crate::database::{ConnectionWithTransaction, DatabaseExecutor};
 use crate::pool::{DatabasePool, Pool, PooledResource};
 use crate::stmt::{query, Column};
 use crate::{
-    column_as_nullable_number, column_as_nullable_string, column_as_number, column_as_string, pool,
+    column_as_nullable_number, column_as_nullable_string, column_as_number, column_as_string,
     unpack_into,
 };
 

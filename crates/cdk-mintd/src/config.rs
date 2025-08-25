@@ -3,10 +3,8 @@ use cdk::nuts::{CurrencyUnit, PublicKey};
 use cdk::Amount;
 use cdk_axum::cache;
 use config::{Config, ConfigError, File};
-use ldk_node::lightning::util::persist::KVStore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
