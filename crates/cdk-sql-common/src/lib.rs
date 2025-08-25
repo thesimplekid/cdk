@@ -10,9 +10,6 @@ pub mod pool;
 pub mod stmt;
 pub mod value;
 
-#[cfg(feature = "ldk")]
-pub mod ldk;
-
 pub use cdk_common::database::ConversionError;
 pub use common::{run_db_operation, run_db_operation_sync};
 

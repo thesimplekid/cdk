@@ -296,7 +296,7 @@ impl LnBackendSetup for config::LdkNode {
 
             Some(
                 Arc::new(
-                    LdkPgDatabase::new(_settings.clone().database.postgres.unwrap().url.as_str())
+                    LdkPgDatabase::new(_settings.clone().ldk_node.unwrap().storage_dir_path.unwrap().as_str())
                         .await?,
                 )
                     .clone() as Arc<dyn KVStore + Send + Sync>,

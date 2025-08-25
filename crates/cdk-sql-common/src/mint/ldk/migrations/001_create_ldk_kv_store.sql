@@ -1,7 +1,7 @@
 -- Create table for LDK KV store data
 CREATE TABLE IF NOT EXISTS ldk_kv_store (
     primary_namespace   TEXT            NOT NULL,
-    secondary_namespace TEXT DEFAULT "" NOT NULL,
+    secondary_namespace TEXT            NOT NULL,
     key                 TEXT            NOT NULL,
     value               BYTEA,
     PRIMARY KEY (primary_namespace, secondary_namespace, key)
