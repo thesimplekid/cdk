@@ -1,10 +1,10 @@
 use crate::config::{self, DatabaseEngine, Settings};
+use crate::expand_path;
 #[cfg(feature = "fakewallet")]
 use std::collections::HashMap;
 #[cfg(feature = "fakewallet")]
 use std::collections::HashSet;
 use std::path::Path;
-use crate::expand_path;
 
 #[cfg(feature = "cln")]
 use anyhow::anyhow;
@@ -25,10 +25,10 @@ use cdk::nuts::CurrencyUnit;
 ))]
 use cdk::types::FeeReserve;
 
-use ldk_node::lightning::util::persist::KVStore;
-use std::sync::Arc;
 #[cfg(feature = "postgres")]
 use cdk_postgres::LdkPgDatabase;
+use ldk_node::lightning::util::persist::KVStore;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait LnBackendSetup {
@@ -293,13 +293,20 @@ impl LnBackendSetup for config::LdkNode {
         // For now, let's construct it manually based on the cdk-ldk-node implementation
         let listen_address = vec![socket_addr.into()];
         let localstore = if _settings.database.engine == DatabaseEngine::Postgres {
-
             Some(
                 Arc::new(
-                    LdkPgDatabase::new(_settings.clone().ldk_node.unwrap().storage_dir_path.unwrap().as_str())
-                        .await?,
+                    LdkPgDatabase::new(
+                        _settings
+                            .clone()
+                            .ldk_node
+                            .unwrap()
+                            .storage_dir_path
+                            .unwrap()
+                            .as_str(),
+                    )
+                    .await?,
                 )
-                    .clone() as Arc<dyn KVStore + Send + Sync>,
+                .clone() as Arc<dyn KVStore + Send + Sync>,
             )
         } else {
             None
@@ -312,7 +319,7 @@ impl LnBackendSetup for config::LdkNode {
             fee_reserve,
             listen_address,
             runtime,
-            localstore
+            localstore,
         )?;
 
         // Configure webserver address if specified

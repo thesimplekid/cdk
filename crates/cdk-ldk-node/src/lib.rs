@@ -20,11 +20,11 @@ use ldk_node::bitcoin::hashes::Hash;
 use ldk_node::bitcoin::Network;
 use ldk_node::lightning::ln::channelmanager::PaymentId;
 use ldk_node::lightning::ln::msgs::SocketAddress;
+use ldk_node::lightning::util::persist::KVStore;
 use ldk_node::lightning_invoice::{Bolt11InvoiceDescription, Description};
 use ldk_node::lightning_types::payment::PaymentHash;
 use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
 use ldk_node::{Builder, Event, Node};
-use ldk_node::lightning::util::persist::KVStore;
 use tokio::runtime::Runtime;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
@@ -165,9 +165,7 @@ impl CdkLdkNode {
                 builder.set_storage_dir_path(storage_dir_path);
                 builder.build()?
             }
-            Some(store_ref)     => {
-                builder.build_with_store(store_ref)?
-            }
+            Some(store_ref) => builder.build_with_store(store_ref)?,
         };
         tracing::info!("Creating tokio channel for payment notifications");
         let (sender, receiver) = tokio::sync::broadcast::channel(8);

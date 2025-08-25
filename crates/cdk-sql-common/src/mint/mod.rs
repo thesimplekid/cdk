@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bitcoin::bip32::DerivationPath;
-use lightning::util::persist::KVStore;
 use cdk_common::common::QuoteTTL;
 use cdk_common::database::{
     self, ConversionError, Error, MintDatabase, MintDbWriterFinalizer, MintKeyDatabaseTransaction,
@@ -34,6 +33,7 @@ use cdk_common::{
     Amount, BlindSignature, BlindSignatureDleq, CurrencyUnit, Id, MeltQuoteState, MintInfo,
     PaymentMethod, Proof, Proofs, PublicKey, SecretKey, State,
 };
+use lightning::util::persist::KVStore;
 use lightning_invoice::Bolt11Invoice;
 use migrations::MIGRATIONS;
 
@@ -44,7 +44,10 @@ use crate::common::migrate;
 use crate::database::{ConnectionWithTransaction, DatabaseExecutor};
 use crate::pool::{DatabasePool, Pool, PooledResource};
 use crate::stmt::{query, Column};
-use crate::{column_as_nullable_number, column_as_nullable_string, column_as_number, column_as_string, pool, unpack_into};
+use crate::{
+    column_as_nullable_number, column_as_nullable_string, column_as_number, column_as_string, pool,
+    unpack_into,
+};
 
 #[cfg(feature = "auth")]
 mod auth;
@@ -65,7 +68,6 @@ where
 {
     pool: Arc<Pool<RM>>,
 }
-
 
 /// SQL Transaction Writer
 pub struct SQLTransaction<RM>

@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use async_trait::async_trait;
-use lightning::util::persist::KVStore;
-use cdk_common::database::Error;
 use crate::column_as_string;
 use crate::common::migrate;
 use crate::database::{ConnectionWithTransaction, DatabaseExecutor};
+use async_trait::async_trait;
+use cdk_common::database::Error;
+use lightning::util::persist::KVStore;
 use migrations::MIGRATIONS;
+use std::sync::Arc;
 mod migrations;
 use crate::pool::{DatabasePool, Pool, PooledResource};
 use crate::stmt::query;
@@ -24,7 +24,12 @@ where
     D: DatabasePool + Send + Sync,
     D::Connection: DatabaseExecutor,
 {
-    fn read(&self, primary_namespace: &str, secondary_namespace: &str, key: &str) -> Result<Vec<u8>, bitcoin::io::Error> {
+    fn read(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> Result<Vec<u8>, bitcoin::io::Error> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let conn = self.pool.get()
@@ -65,25 +70,34 @@ where
         })
     }
 
-    fn write(&self, primary_namespace: &str, secondary_namespace: &str, key: &str, buf: &[u8]) -> Result<(), bitcoin::io::Error> {
+    fn write(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        buf: &[u8],
+    ) -> Result<(), bitcoin::io::Error> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let conn = self.pool.get()
+                let conn = self
+                    .pool
+                    .get()
                     .map_err(|e| bitcoin::io::Error::new(bitcoin::io::ErrorKind::Other, e))?;
 
                 let stmt = query(
                     "INSERT INTO ldk_kv_store (primary_namespace, secondary_namespace, key, value)
                      VALUES (:primary_namespace, :secondary_namespace, :key, :value)
                      ON CONFLICT (primary_namespace, secondary_namespace, key)
-                     DO UPDATE SET value = :value"
+                     DO UPDATE SET value = :value",
                 )
-                    .map_err(|e| bitcoin::io::Error::new(bitcoin::io::ErrorKind::Other, e))?
-                    .bind("primary_namespace", primary_namespace)
-                    .bind("secondary_namespace", secondary_namespace)
-                    .bind("key", key)
-                    .bind("value", buf.to_vec());
+                .map_err(|e| bitcoin::io::Error::new(bitcoin::io::ErrorKind::Other, e))?
+                .bind("primary_namespace", primary_namespace)
+                .bind("secondary_namespace", secondary_namespace)
+                .bind("key", key)
+                .bind("value", buf.to_vec());
 
-                stmt.execute(&*conn).await
+                stmt.execute(&*conn)
+                    .await
                     .map_err(|e| bitcoin::io::Error::new(bitcoin::io::ErrorKind::Other, e))?;
 
                 Ok(())
@@ -91,7 +105,13 @@ where
         })
     }
 
-    fn remove(&self, primary_namespace: &str, secondary_namespace: &str, key: &str, _lazy: bool) -> Result<(), bitcoin::io::Error> {
+    fn remove(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        _lazy: bool,
+    ) -> Result<(), bitcoin::io::Error> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let conn = self.pool.get()
@@ -113,7 +133,11 @@ where
         })
     }
 
-    fn list(&self, primary_namespace: &str, secondary_namespace: &str) -> Result<Vec<String>, bitcoin::io::Error> {
+    fn list(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+    ) -> Result<Vec<String>, bitcoin::io::Error> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let conn = self.pool.get()
