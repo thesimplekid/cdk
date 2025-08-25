@@ -29,6 +29,7 @@ use tokio::runtime::Runtime;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
+
 use crate::error::Error;
 
 mod error;
@@ -109,6 +110,7 @@ impl CdkLdkNode {
     /// * `fee_reserve` - Fee reserve configuration for payments
     /// * `listening_address` - Socket addresses for peer connections
     /// * `runtime` - Optional Tokio runtime to use for starting the node
+    /// * `store` - Optional KVStore of lightning node for postgres support
     ///
     /// # Returns
     /// A new `CdkLdkNode` instance ready to be started
@@ -128,6 +130,7 @@ impl CdkLdkNode {
         let mut builder = Builder::new();
         builder.set_network(network);
         tracing::info!("Storage dir of node is {}", storage_dir_path);
+        builder.set_storage_dir_path(storage_dir_path);
 
         match chain_source {
             ChainSource::Esplora(esplora_url) => {

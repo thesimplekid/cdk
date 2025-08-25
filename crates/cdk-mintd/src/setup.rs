@@ -304,7 +304,6 @@ impl LnBackendSetup for config::LdkNode {
         } else {
             None
         };
-
         let mut ldk_node = cdk_ldk_node::CdkLdkNode::new(
             network,
             chain_source,

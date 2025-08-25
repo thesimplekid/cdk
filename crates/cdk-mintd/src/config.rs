@@ -205,7 +205,6 @@ pub struct Lnd {
     pub reserve_fee_min: Amount,
 }
 
-
 #[cfg(feature = "ldk-node")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LdkNode {
@@ -287,8 +286,6 @@ fn default_webserver_host() -> Option<String> {
 fn default_webserver_port() -> Option<u16> {
     Some(8091)
 }
-
-
 
 #[cfg(feature = "fakewallet")]
 #[derive(Debug, Clone, Serialize, Deserialize)]

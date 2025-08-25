@@ -344,13 +344,6 @@ procs:
       CDK_ITESTS_DIR: "$CDK_ITESTS_DIR"
       CDK_MINTD_DATABASE: "$CDK_MINTD_DATABASE"
 
-  ldk-node-mint:
-    shell: "$CDK_ITESTS_DIR/start_ldk_node_mint.sh"
-    autostart: true
-    env:
-      CDK_ITESTS_DIR: "$CDK_ITESTS_DIR"
-      CDK_MINTD_DATABASE: "$CDK_MINTD_DATABASE"
-
   bitcoind:
     shell: "while [ ! -f $CDK_ITESTS_DIR/bitcoin/regtest/debug.log ]; do sleep 1; done && tail -f $CDK_ITESTS_DIR/bitcoin/regtest/debug.log"
     autostart: true
