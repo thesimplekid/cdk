@@ -211,6 +211,7 @@ async fn start_ldk_mint(
         ldk_node_host: Some("127.0.0.1".to_string()),
         ldk_node_port: Some(port + 10), // Use a different port for the LDK node P2P connections
         gossip_source_type: None,
+        store: None,
         rgs_url: None,
         webserver_host: Some("127.0.0.1".to_string()),
         webserver_port: Some(port + 1), // Use next port for web interface
@@ -343,6 +344,7 @@ fn main() -> Result<()> {
                 port: 8092,
             }],
             Some(Arc::clone(&rt_clone)),
+            None
         )?;
 
         let inner_node = cdk_ldk.node();

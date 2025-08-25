@@ -125,7 +125,6 @@ impl CdkLdkNode {
         runtime: Option<Arc<Runtime>>,
         store: Option<Arc<dyn KVStore + Sync + Send>>,
     ) -> Result<Self, Error> {
-        // use build_with_store here to support ldk
         let mut builder = Builder::new();
         builder.set_network(network);
         tracing::info!("Storage dir of node is {}", storage_dir_path);
