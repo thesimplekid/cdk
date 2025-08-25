@@ -1,10 +1,11 @@
 use std::path::PathBuf;
-
+use std::sync::Arc;
 use bitcoin::hashes::{sha256, Hash};
 use cdk::nuts::{CurrencyUnit, PublicKey};
 use cdk::Amount;
 use cdk_axum::cache;
 use config::{Config, ConfigError, File};
+use ldk_node::lightning::util::persist::KVStore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -206,7 +207,7 @@ pub struct Lnd {
 }
 
 #[cfg(feature = "ldk-node")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LdkNode {
     /// Fee percentage (e.g., 0.02 for 2%)
     #[serde(default = "default_ldk_fee_percent")]
@@ -241,6 +242,33 @@ pub struct LdkNode {
     /// Webserver port
     #[serde(default = "default_webserver_port")]
     pub webserver_port: Option<u16>,
+    #[serde(skip)]
+    pub store: Option<Arc<dyn KVStore + Sync + Send>>,
+}
+
+#[cfg(feature = "ldk-node")]
+impl std::fmt::Debug for LdkNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LdkNode")
+            .field("fee_percent", &self.fee_percent)
+            .field("reserve_fee_min", &self.reserve_fee_min)
+            .field("bitcoin_network", &self.bitcoin_network)
+            .field("chain_source_type", &self.chain_source_type)
+            .field("esplora_url", &self.esplora_url)
+            .field("bitcoind_rpc_host", &self.bitcoind_rpc_host)
+            .field("bitcoind_rpc_port", &self.bitcoind_rpc_port)
+            .field("bitcoind_rpc_user", &self.bitcoind_rpc_user)
+            .field("bitcoind_rpc_password", &self.bitcoind_rpc_password)
+            .field("storage_dir_path", &self.storage_dir_path)
+            .field("ldk_node_host", &self.ldk_node_host)
+            .field("ldk_node_port", &self.ldk_node_port)
+            .field("gossip_source_type", &self.gossip_source_type)
+            .field("rgs_url", &self.rgs_url)
+            .field("webserver_host", &self.webserver_host)
+            .field("webserver_port", &self.webserver_port)
+            .field("store", &self.store.as_ref().map(|_| "<KVStore>"))
+            .finish()
+    }
 }
 
 #[cfg(feature = "ldk-node")]
@@ -258,6 +286,7 @@ impl Default for LdkNode {
             bitcoind_rpc_password: None,
             storage_dir_path: None,
             ldk_node_host: None,
+            store:None,
             ldk_node_port: None,
             gossip_source_type: None,
             rgs_url: None,

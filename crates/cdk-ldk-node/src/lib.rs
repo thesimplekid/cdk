@@ -24,6 +24,7 @@ use ldk_node::lightning_invoice::{Bolt11InvoiceDescription, Description};
 use ldk_node::lightning_types::payment::PaymentHash;
 use ldk_node::payment::{PaymentDirection, PaymentKind, PaymentStatus, SendingParameters};
 use ldk_node::{Builder, Event, Node};
+use ldk_node::lightning::util::persist::KVStore;
 use tokio::runtime::Runtime;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
@@ -123,11 +124,12 @@ impl CdkLdkNode {
         fee_reserve: FeeReserve,
         listening_address: Vec<SocketAddress>,
         runtime: Option<Arc<Runtime>>,
+        store: Option<Arc<dyn KVStore + Sync + Send>>,
     ) -> Result<Self, Error> {
+        // use build_with_store here to support ldk
         let mut builder = Builder::new();
         builder.set_network(network);
         tracing::info!("Storage dir of node is {}", storage_dir_path);
-        builder.set_storage_dir_path(storage_dir_path);
 
         match chain_source {
             ChainSource::Esplora(esplora_url) => {
@@ -156,8 +158,15 @@ impl CdkLdkNode {
 
         builder.set_node_alias("cdk-ldk-node".to_string())?;
 
-        let node = builder.build()?;
-
+        //let node = builder.build_with_store(store.unwrap())?;
+        let node = match store {
+            None => {
+                builder.build()?
+            }
+            Some(store_ref)     => {
+                builder.build_with_store(store_ref)?
+            }
+        };
         tracing::info!("Creating tokio channel for payment notifications");
         let (sender, receiver) = tokio::sync::broadcast::channel(8);
 

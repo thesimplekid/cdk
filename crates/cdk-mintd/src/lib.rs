@@ -498,7 +498,7 @@ async fn configure_lightning_backend(
             let ldk_node = ldk_node_settings
                 .setup(ln_routers, settings, CurrencyUnit::Sat, _runtime, work_dir)
                 .await?;
-
+            
             mint_builder = configure_backend_for_unit(
                 settings,
                 mint_builder,

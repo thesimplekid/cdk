@@ -39,6 +39,7 @@ readme = "README.md"
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
+rmcp = { version = "0.2.0", features = ["server"] }
 axum = { version = "0.8.1", features = ["ws"] }
 bitcoin = { version = "0.32.2", features = ["base64", "serde", "rand", "rand-std"] }
 bip39 = { version = "2.0", features = ["rand"] }

@@ -1,15 +1,14 @@
-#[cfg(feature = "fakewallet")]
-use std::collections::HashMap;
-#[cfg(feature = "fakewallet")]
-use std::collections::HashSet;
-use std::path::Path;
-
+use crate::config::{self, DatabaseEngine, Settings};
+#[cfg(feature = "cln")]
+use crate::expand_path;
 #[cfg(feature = "cln")]
 use anyhow::anyhow;
 use async_trait::async_trait;
 use axum::Router;
 #[cfg(feature = "fakewallet")]
 use bip39::rand::{thread_rng, Rng};
+use cdk::cdk_database;
+use cdk::cdk_database::MintDatabase;
 use cdk::cdk_payment::MintPayment;
 #[cfg(feature = "lnbits")]
 use cdk::mint_url::MintUrl;
@@ -22,10 +21,14 @@ use cdk::nuts::CurrencyUnit;
     feature = "fakewallet"
 ))]
 use cdk::types::FeeReserve;
-
-use crate::config::{self, Settings};
-#[cfg(feature = "cln")]
-use crate::expand_path;
+use cdk_postgres::{LdkPgDatabase, MintPgDatabase};
+use ldk_node::lightning::util::persist::KVStore;
+#[cfg(feature = "fakewallet")]
+use std::collections::HashMap;
+#[cfg(feature = "fakewallet")]
+use std::collections::HashSet;
+use std::path::Path;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait LnBackendSetup {
@@ -319,6 +322,17 @@ impl LnBackendSetup for config::LdkNode {
         // We need to get the actual socket address struct from ldk_node
         // For now, let's construct it manually based on the cdk-ldk-node implementation
         let listen_address = vec![socket_addr.into()];
+        let localstore = if _settings.database.engine == DatabaseEngine::Postgres {
+            Some(
+                Arc::new(
+                    LdkPgDatabase::new(_settings.clone().database.postgres.unwrap().url.as_str())
+                        .await?,
+                )
+                .clone() as Arc<dyn KVStore + Send + Sync>,
+            )
+        } else {
+            None
+        };
 
         let mut ldk_node = cdk_ldk_node::CdkLdkNode::new(
             network,
@@ -328,6 +342,7 @@ impl LnBackendSetup for config::LdkNode {
             fee_reserve,
             listen_address,
             runtime,
+            localstore,
         )?;
 
         // Configure webserver address if specified

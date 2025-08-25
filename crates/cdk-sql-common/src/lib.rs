@@ -1,4 +1,4 @@
-//! SQLite storage backend for cdk
+//! SQL storage backend for cdk
 
 #![warn(missing_docs)]
 #![warn(rustdoc::bare_urls)]
@@ -9,6 +9,9 @@ mod macros;
 pub mod pool;
 pub mod stmt;
 pub mod value;
+
+#[cfg(feature = "ldk")]
+pub mod ldk;
 
 pub use cdk_common::database::ConversionError;
 pub use common::{run_db_operation, run_db_operation_sync};
