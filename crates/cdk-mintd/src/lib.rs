@@ -462,6 +462,24 @@ async fn configure_lightning_backend(
             )
             .await?;
         }
+        #[cfg(feature = "ldk-node")]
+        LnBackend::LdkNode => {
+            let ldk_node_settings = settings.clone().ldk_node.expect("Checked at config load");
+            tracing::info!("Using LDK Node backend: {:?}", ldk_node_settings);
+
+            let ldk_node = ldk_node_settings
+                .setup(ln_routers, settings, CurrencyUnit::Sat, _runtime, work_dir)
+                .await?;
+
+            mint_builder = configure_backend_for_unit(
+                settings,
+                mint_builder,
+                CurrencyUnit::Sat,
+                mint_melt_limits,
+                Arc::new(ldk_node),
+            )
+                .await?;
+        }
         #[cfg(feature = "fakewallet")]
         LnBackend::FakeWallet => {
             let fake_wallet = settings.clone().fake_wallet.expect("Fake wallet defined");

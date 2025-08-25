@@ -130,7 +130,6 @@ impl CdkLdkNode {
         let mut builder = Builder::new();
         builder.set_network(network);
         tracing::info!("Storage dir of node is {}", storage_dir_path);
-        builder.set_storage_dir_path(storage_dir_path);
 
         match chain_source {
             ChainSource::Esplora(esplora_url) => {

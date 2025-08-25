@@ -33,10 +33,8 @@ use cdk_common::{
     Amount, BlindSignature, BlindSignatureDleq, CurrencyUnit, Id, MeltQuoteState, MintInfo,
     PaymentMethod, Proof, Proofs, PublicKey, SecretKey, State,
 };
-use lightning::util::persist::KVStore;
 use lightning_invoice::Bolt11Invoice;
 use migrations::MIGRATIONS;
-
 use tracing::instrument;
 use uuid::Uuid;
 
