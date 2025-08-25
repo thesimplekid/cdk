@@ -405,9 +405,7 @@ impl Mint {
         mint_quote: &MintQuote,
         wait_payment_response: WaitPaymentResponse,
     ) -> Result<(), Error> {
-        use crate::mint::Mint;
-
-        Mint::handle_mint_quote_payment(tx, mint_quote, wait_payment_response, &self.pubsub_manager)
+        Self::handle_mint_quote_payment(tx, mint_quote, wait_payment_response, &self.pubsub_manager)
             .await
     }
 
@@ -569,27 +567,16 @@ impl Mint {
         )
         .await?;
 
-        tx.increment_mint_quote_amount_issued(&mint_request.quote, mint_request.total_amount()?)
+        let amount_issued = mint_request.total_amount()?;
+
+        let total_issued = tx
+            .increment_mint_quote_amount_issued(&mint_request.quote, amount_issued)
             .await?;
 
         tx.commit().await?;
 
-        match mint_quote.payment_method {
-            PaymentMethod::Bolt11 => {
-                self.pubsub_manager
-                    .mint_quote_bolt11_status(mint_quote.clone(), MintQuoteState::Issued);
-            }
-            PaymentMethod::Bolt12 => {
-                self.pubsub_manager.mint_quote_bolt12_status(
-                    mint_quote.clone(),
-                    Amount::ZERO,
-                    mint_request.total_amount()?,
-                );
-            }
-            PaymentMethod::Custom(_) => {
-                // We don't send ws updates for unknown methods
-            }
-        }
+        self.pubsub_manager
+            .mint_quote_issue(&mint_quote, total_issued);
 
         Ok(MintResponse {
             signatures: blind_signatures,

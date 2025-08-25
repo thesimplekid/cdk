@@ -605,7 +605,7 @@ impl Mint {
             wait_payment_response.payment_amount,
             wait_payment_response.unit,
             mint_quote.id,
-            wait_payment_response.payment_id
+            wait_payment_response.payment_id.to_string()
         );
 
         let quote_state = mint_quote.state();
@@ -618,40 +618,31 @@ impl Mint {
             {
                 tracing::info!("Received payment notification for already issued quote.");
             } else {
-                let amount_paid = to_unit(
+                let payment_amount_quote_unit = to_unit(
                     wait_payment_response.payment_amount,
                     &wait_payment_response.unit,
                     &mint_quote.unit,
                 )?;
 
-                if amount_paid == Amount::ZERO {
+                if payment_amount_quote_unit == Amount::ZERO {
                     tracing::error!("Zero amount payments should not be recorded.");
                     return Err(Error::AmountUndefined);
                 }
 
-                tx.increment_mint_quote_amount_paid(
-                    &mint_quote.id,
-                    amount_paid,
-                    wait_payment_response.payment_id,
-                )
-                .await?;
+                tracing::debug!(
+                    "Payment received amount in quote unit {} {}",
+                    mint_quote.unit,
+                    payment_amount_quote_unit
+                );
 
-                match mint_quote.payment_method {
-                    PaymentMethod::Bolt11 => {
-                        pubsub_manager
-                            .mint_quote_bolt11_status(mint_quote.clone(), MintQuoteState::Paid);
-                    }
-                    PaymentMethod::Bolt12 => {
-                        pubsub_manager.mint_quote_bolt12_status(
-                            mint_quote.clone(),
-                            wait_payment_response.payment_amount,
-                            Amount::ZERO,
-                        );
-                    }
-                    _ => {
-                        // We don't send ws updates for unknown methods
-                    }
-                }
+                let total_paid = tx
+                    .increment_mint_quote_amount_paid(
+                        &mint_quote.id,
+                        payment_amount_quote_unit,
+                        wait_payment_response.payment_id,
+                    )
+                    .await?;
+                pubsub_manager.mint_quote_payment(mint_quote, total_paid);
             }
         } else {
             tracing::info!("Received payment notification for already seen payment.");
@@ -813,8 +804,13 @@ impl Mint {
             mint_quote.id,
             amount
         );
-        tx.increment_mint_quote_amount_paid(&mint_quote.id, amount, melt_quote.id.to_string())
+
+        let total_paid = tx
+            .increment_mint_quote_amount_paid(&mint_quote.id, amount, melt_quote.id.to_string())
             .await?;
+
+        self.pubsub_manager
+            .mint_quote_payment(&mint_quote, total_paid);
 
         tracing::info!(
             "Melt quote {} paid Mint quote {}",

@@ -1,6 +1,11 @@
 use crate::config::{self, DatabaseEngine, Settings};
-#[cfg(feature = "cln")]
+#[cfg(feature = "fakewallet")]
+use std::collections::HashMap;
+#[cfg(feature = "fakewallet")]
+use std::collections::HashSet;
+use std::path::Path;
 use crate::expand_path;
+
 #[cfg(feature = "cln")]
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -10,8 +15,6 @@ use bip39::rand::{thread_rng, Rng};
 use cdk::cdk_database;
 use cdk::cdk_database::MintDatabase;
 use cdk::cdk_payment::MintPayment;
-#[cfg(feature = "lnbits")]
-use cdk::mint_url::MintUrl;
 use cdk::nuts::CurrencyUnit;
 #[cfg(any(
     feature = "lnbits",
@@ -21,14 +24,11 @@ use cdk::nuts::CurrencyUnit;
     feature = "fakewallet"
 ))]
 use cdk::types::FeeReserve;
-use cdk_postgres::{LdkPgDatabase, MintPgDatabase};
+
 use ldk_node::lightning::util::persist::KVStore;
-#[cfg(feature = "fakewallet")]
-use std::collections::HashMap;
-#[cfg(feature = "fakewallet")]
-use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
+#[cfg(feature = "postgres")]
+use cdk_postgres::LdkPgDatabase;
 
 #[async_trait]
 pub trait LnBackendSetup {
@@ -76,8 +76,8 @@ impl LnBackendSetup for config::Cln {
 impl LnBackendSetup for config::LNbits {
     async fn setup(
         &self,
-        routers: &mut Vec<Router>,
-        settings: &Settings,
+        _routers: &mut Vec<Router>,
+        _settings: &Settings,
         _unit: CurrencyUnit,
         _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
         _work_dir: &Path,
@@ -85,26 +85,9 @@ impl LnBackendSetup for config::LNbits {
         let admin_api_key = &self.admin_api_key;
         let invoice_api_key = &self.invoice_api_key;
 
-        // Channel used for lnbits web hook
-        let webhook_endpoint = "/webhook/lnbits/sat/invoice";
-
         let fee_reserve = FeeReserve {
             min_fee_reserve: self.reserve_fee_min,
             percent_fee_reserve: self.fee_percent,
-        };
-
-        let webhook_url = if settings
-            .lnbits
-            .as_ref()
-            .expect("Lnbits must be defined")
-            .retro_api
-        {
-            let mint_url: MintUrl = settings.info.url.parse()?;
-            let webhook_url = mint_url.join(webhook_endpoint)?;
-
-            Some(webhook_url.to_string())
-        } else {
-            None
         };
 
         let lnbits = cdk_lnbits::LNbits::new(
@@ -112,24 +95,11 @@ impl LnBackendSetup for config::LNbits {
             invoice_api_key.clone(),
             self.lnbits_api.clone(),
             fee_reserve,
-            webhook_url,
         )
         .await?;
 
-        if settings
-            .lnbits
-            .as_ref()
-            .expect("Lnbits must be defined")
-            .retro_api
-        {
-            let router = lnbits
-                .create_invoice_webhook_router(webhook_endpoint)
-                .await?;
-
-            routers.push(router);
-        } else {
-            lnbits.subscribe_ws().await?;
-        };
+        // Use v1 websocket API
+        lnbits.subscribe_ws().await?;
 
         Ok(lnbits)
     }
@@ -323,12 +293,13 @@ impl LnBackendSetup for config::LdkNode {
         // For now, let's construct it manually based on the cdk-ldk-node implementation
         let listen_address = vec![socket_addr.into()];
         let localstore = if _settings.database.engine == DatabaseEngine::Postgres {
+
             Some(
                 Arc::new(
                     LdkPgDatabase::new(_settings.clone().database.postgres.unwrap().url.as_str())
                         .await?,
                 )
-                .clone() as Arc<dyn KVStore + Send + Sync>,
+                    .clone() as Arc<dyn KVStore + Send + Sync>,
             )
         } else {
             None
@@ -342,7 +313,7 @@ impl LnBackendSetup for config::LdkNode {
             fee_reserve,
             listen_address,
             runtime,
-            localstore,
+            localstore
         )?;
 
         // Configure webserver address if specified

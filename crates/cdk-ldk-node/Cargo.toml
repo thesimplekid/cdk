@@ -17,8 +17,6 @@ cdk-common = { workspace = true, features = ["mint"] }
 cdk-postgres = { workspace = true, optional = true }
 cdk-sql-common = { workspace = true, optional = true }
 futures.workspace = true
-
-uuid = { version = "1.0", features = ["v4"] }
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
@@ -30,6 +28,9 @@ serde_json.workspace = true
 maud = "0.27.0"
 tower.workspace = true
 tower-http.workspace = true
+rust-embed = "8.5.0"
+serde_urlencoded = "0.7"
+urlencoding = "2.1"
 
 [features]
 default = []

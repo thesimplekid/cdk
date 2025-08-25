@@ -242,6 +242,8 @@ export CDK_MINTD_WORK_DIR="$CDK_ITESTS_DIR/ldk_node_mint"
 export CDK_MINTD_LISTEN_HOST="127.0.0.1"
 export CDK_MINTD_LISTEN_PORT=8089
 export CDK_MINTD_LN_BACKEND="ldk-node"
+export CDK_MINTD_LOGGING_CONSOLE_LEVEL="debug"
+export CDK_MINTD_LOGGING_FILE_LEVEL="debug"
 export CDK_MINTD_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 export RUST_BACKTRACE=1
 export CDK_MINTD_DATABASE="$CDK_MINTD_DATABASE"
@@ -334,14 +336,21 @@ procs:
     env:
       CDK_ITESTS_DIR: "$CDK_ITESTS_DIR"
       CDK_MINTD_DATABASE: "$CDK_MINTD_DATABASE"
-  
+
   ldk-node-mint:
     shell: "$CDK_ITESTS_DIR/start_ldk_node_mint.sh"
     autostart: true
     env:
       CDK_ITESTS_DIR: "$CDK_ITESTS_DIR"
       CDK_MINTD_DATABASE: "$CDK_MINTD_DATABASE"
-  
+
+  ldk-node-mint:
+    shell: "$CDK_ITESTS_DIR/start_ldk_node_mint.sh"
+    autostart: true
+    env:
+      CDK_ITESTS_DIR: "$CDK_ITESTS_DIR"
+      CDK_MINTD_DATABASE: "$CDK_MINTD_DATABASE"
+
   bitcoind:
     shell: "while [ ! -f $CDK_ITESTS_DIR/bitcoin/regtest/debug.log ]; do sleep 1; done && tail -f $CDK_ITESTS_DIR/bitcoin/regtest/debug.log"
     autostart: true
@@ -361,7 +370,7 @@ procs:
   lnd-two:
     shell: "while [ ! -f $CDK_ITESTS_DIR/lnd/two/logs/bitcoin/regtest/lnd.log ]; do sleep 1; done && tail -f $CDK_ITESTS_DIR/lnd/two/logs/bitcoin/regtest/lnd.log"
     autostart: true
-  
+
   ldk-node:
     shell: "while [ ! -f $CDK_ITESTS_DIR/ldk_mint/ldk_node.log ]; do sleep 1; done && $PROJECT_ROOT/misc/scripts/filtered_ldk_node_log.sh $CDK_ITESTS_DIR/ldk_mint/ldk_node.log"
     autostart: true

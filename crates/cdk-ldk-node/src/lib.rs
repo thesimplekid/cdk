@@ -29,7 +29,6 @@ use tokio::runtime::Runtime;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
-
 use crate::error::Error;
 
 mod error;
@@ -161,6 +160,7 @@ impl CdkLdkNode {
         //let node = builder.build_with_store(store.unwrap())?;
         let node = match store {
             None => {
+                builder.set_storage_dir_path(storage_dir_path);
                 builder.build()?
             }
             Some(store_ref)     => {
@@ -604,11 +604,10 @@ impl MintPayment for CdkLdkNode {
                     .map_err(|_| Error::InvalidPaymentHashLength)?;
 
                 Ok(PaymentQuoteResponse {
-                    request_lookup_id: PaymentIdentifier::PaymentHash(payment_hash_bytes),
+                    request_lookup_id: Some(PaymentIdentifier::PaymentHash(payment_hash_bytes)),
                     amount,
                     fee: fee.into(),
                     state: MeltQuoteState::Unpaid,
-                    options: None,
                     unit: unit.clone(),
                 })
             }
@@ -641,11 +640,10 @@ impl MintPayment for CdkLdkNode {
                 };
 
                 Ok(PaymentQuoteResponse {
-                    request_lookup_id: PaymentIdentifier::OfferId(offer.id().to_string()),
+                    request_lookup_id: None,
                     amount,
                     fee: fee.into(),
                     state: MeltQuoteState::Unpaid,
-                    options: None,
                     unit: unit.clone(),
                 })
             }
@@ -821,7 +819,7 @@ impl MintPayment for CdkLdkNode {
                 let total_spent = to_unit(total_spent, &CurrencyUnit::Msat, unit)?;
 
                 Ok(MakePaymentResponse {
-                    payment_lookup_id: PaymentIdentifier::OfferId(offer.id().to_string()),
+                    payment_lookup_id: PaymentIdentifier::PaymentId(payment_id.0),
                     payment_proof,
                     status,
                     total_spent,
@@ -945,7 +943,7 @@ impl MintPayment for CdkLdkNode {
                 )
                 .first()
                 .cloned(),
-            PaymentIdentifier::CustomId(id) => self.inner.payment(&PaymentId(
+            PaymentIdentifier::PaymentId(id) => self.inner.payment(&PaymentId(
                 hex::decode(id)?
                     .try_into()
                     .map_err(|_| payment::Error::Custom("Invalid hex".to_string()))?,

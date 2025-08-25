@@ -183,7 +183,6 @@ pub struct LNbits {
     pub lnbits_api: String,
     pub fee_percent: f32,
     pub reserve_fee_min: Amount,
-    pub retro_api: bool,
 }
 
 #[cfg(feature = "cln")]
@@ -206,45 +205,6 @@ pub struct Lnd {
     pub reserve_fee_min: Amount,
 }
 
-#[cfg(feature = "ldk-node")]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct LdkNode {
-    /// Fee percentage (e.g., 0.02 for 2%)
-    #[serde(default = "default_ldk_fee_percent")]
-    pub fee_percent: f32,
-    /// Minimum reserve fee
-    #[serde(default = "default_ldk_reserve_fee_min")]
-    pub reserve_fee_min: Amount,
-    /// Bitcoin network (mainnet, testnet, signet, regtest)
-    pub bitcoin_network: Option<String>,
-    /// Chain source type (esplora or bitcoinrpc)
-    pub chain_source_type: Option<String>,
-    /// Esplora URL (when chain_source_type = "esplora")
-    pub esplora_url: Option<String>,
-    /// Bitcoin RPC configuration (when chain_source_type = "bitcoinrpc")
-    pub bitcoind_rpc_host: Option<String>,
-    pub bitcoind_rpc_port: Option<u16>,
-    pub bitcoind_rpc_user: Option<String>,
-    pub bitcoind_rpc_password: Option<String>,
-    /// Storage directory path
-    pub storage_dir_path: Option<String>,
-    /// LDK node listening host
-    pub ldk_node_host: Option<String>,
-    /// LDK node listening port
-    pub ldk_node_port: Option<u16>,
-    /// Gossip source type (p2p or rgs)
-    pub gossip_source_type: Option<String>,
-    /// Rapid Gossip Sync URL (when gossip_source_type = "rgs")
-    pub rgs_url: Option<String>,
-    /// Webserver host (defaults to 127.0.0.1)
-    #[serde(default = "default_webserver_host")]
-    pub webserver_host: Option<String>,
-    /// Webserver port
-    #[serde(default = "default_webserver_port")]
-    pub webserver_port: Option<u16>,
-    #[serde(skip)]
-    pub store: Option<Arc<dyn KVStore + Sync + Send>>,
-}
 
 #[cfg(feature = "ldk-node")]
 impl std::fmt::Debug for LdkNode {
@@ -314,6 +274,46 @@ fn default_webserver_host() -> Option<String> {
 #[cfg(feature = "ldk-node")]
 fn default_webserver_port() -> Option<u16> {
     Some(8091)
+}
+
+#[cfg(feature = "ldk-node")]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct LdkNode {
+    /// Fee percentage (e.g., 0.02 for 2%)
+    #[serde(default = "default_ldk_fee_percent")]
+    pub fee_percent: f32,
+    /// Minimum reserve fee
+    #[serde(default = "default_ldk_reserve_fee_min")]
+    pub reserve_fee_min: Amount,
+    /// Bitcoin network (mainnet, testnet, signet, regtest)
+    pub bitcoin_network: Option<String>,
+    /// Chain source type (esplora or bitcoinrpc)
+    pub chain_source_type: Option<String>,
+    /// Esplora URL (when chain_source_type = "esplora")
+    pub esplora_url: Option<String>,
+    /// Bitcoin RPC configuration (when chain_source_type = "bitcoinrpc")
+    pub bitcoind_rpc_host: Option<String>,
+    pub bitcoind_rpc_port: Option<u16>,
+    pub bitcoind_rpc_user: Option<String>,
+    pub bitcoind_rpc_password: Option<String>,
+    /// Storage directory path
+    pub storage_dir_path: Option<String>,
+    /// LDK node listening host
+    pub ldk_node_host: Option<String>,
+    /// LDK node listening port
+    pub ldk_node_port: Option<u16>,
+    /// Gossip source type (p2p or rgs)
+    pub gossip_source_type: Option<String>,
+    /// Rapid Gossip Sync URL (when gossip_source_type = "rgs")
+    pub rgs_url: Option<String>,
+    /// Webserver host (defaults to 127.0.0.1)
+    #[serde(default = "default_webserver_host")]
+    pub webserver_host: Option<String>,
+    /// Webserver port
+    #[serde(default = "default_webserver_port")]
+    pub webserver_port: Option<u16>,
+    #[serde(skip)]
+    pub store: Option<Arc<dyn KVStore + Sync + Send>>,
 }
 
 #[cfg(feature = "fakewallet")]
