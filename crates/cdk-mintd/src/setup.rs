@@ -1,3 +1,5 @@
+use crate::config::{self, DatabaseEngine, Settings};
+use crate::expand_path;
 #[cfg(feature = "fakewallet")]
 use std::collections::HashMap;
 #[cfg(feature = "fakewallet")]
@@ -10,6 +12,8 @@ use async_trait::async_trait;
 use axum::Router;
 #[cfg(feature = "fakewallet")]
 use bip39::rand::{thread_rng, Rng};
+use cdk::cdk_database;
+use cdk::cdk_database::MintDatabase;
 use cdk::cdk_payment::MintPayment;
 use cdk::nuts::CurrencyUnit;
 #[cfg(any(
@@ -21,9 +25,10 @@ use cdk::nuts::CurrencyUnit;
 ))]
 use cdk::types::FeeReserve;
 
-use crate::config::{self, Settings};
-#[cfg(feature = "cln")]
-use crate::expand_path;
+#[cfg(feature = "postgres")]
+use cdk_postgres::LdkPgDatabase;
+use ldk_node::lightning::util::persist::KVStore;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait LnBackendSetup {
@@ -192,7 +197,7 @@ impl LnBackendSetup for config::LdkNode {
     async fn setup(
         &self,
         _routers: &mut Vec<Router>,
-        _settings: &Settings,
+        settings: &Settings,
         _unit: CurrencyUnit,
         runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
         work_dir: &Path,
@@ -287,7 +292,25 @@ impl LnBackendSetup for config::LdkNode {
         // We need to get the actual socket address struct from ldk_node
         // For now, let's construct it manually based on the cdk-ldk-node implementation
         let listen_address = vec![socket_addr.into()];
-
+        let localstore = if settings.database.engine == DatabaseEngine::Postgres {
+            Some(
+                Arc::new(
+                    LdkPgDatabase::new(
+                        settings
+                            .clone()
+                            .ldk_node
+                            .unwrap()
+                            .storage_dir_path
+                            .unwrap()
+                            .as_str(),
+                    )
+                    .await?,
+                )
+                .clone() as Arc<dyn KVStore + Send + Sync>,
+            )
+        } else {
+            None
+        };
         let mut ldk_node = cdk_ldk_node::CdkLdkNode::new(
             network,
             chain_source,
@@ -296,6 +319,7 @@ impl LnBackendSetup for config::LdkNode {
             fee_reserve,
             listen_address,
             runtime,
+            localstore,
         )?;
 
         // Configure webserver address if specified
