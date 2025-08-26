@@ -197,7 +197,7 @@ impl LnBackendSetup for config::LdkNode {
     async fn setup(
         &self,
         _routers: &mut Vec<Router>,
-        _settings: &Settings,
+        settings: &Settings,
         _unit: CurrencyUnit,
         runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
         work_dir: &Path,
@@ -292,11 +292,11 @@ impl LnBackendSetup for config::LdkNode {
         // We need to get the actual socket address struct from ldk_node
         // For now, let's construct it manually based on the cdk-ldk-node implementation
         let listen_address = vec![socket_addr.into()];
-        let localstore = if _settings.database.engine == DatabaseEngine::Postgres {
+        let localstore = if settings.database.engine == DatabaseEngine::Postgres {
             Some(
                 Arc::new(
                     LdkPgDatabase::new(
-                        _settings
+                        settings
                             .clone()
                             .ldk_node
                             .unwrap()
