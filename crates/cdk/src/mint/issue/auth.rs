@@ -12,14 +12,14 @@ impl Mint {
         auth_token: AuthToken,
         mint_auth_request: MintAuthRequest,
     ) -> Result<MintResponse, Error> {
-        let cat = if let AuthToken::ClearAuth(cat) = auth_token {
-            cat
-        } else {
-            tracing::debug!("Received blind auth mint without cat");
-            return Err(Error::ClearAuthRequired);
-        };
+        // let cat = if let AuthToken::ClearAuth(cat) = auth_token {
+        //     cat
+        // } else {
+        //     tracing::debug!("Received blind auth mint without cat");
+        //     return Err(Error::ClearAuthRequired);
+        // };
 
-        self.verify_clear_auth(cat).await?;
+        // self.verify_clear_auth(cat).await?;
 
         let auth_settings = self
             .mint_info()

@@ -42,87 +42,87 @@ pub async fn mint_blind_auth(
 
     wallet.fetch_mint_info().await?;
 
-    // Try to get the token from the provided argument or from the stored file
-    let cat = match &sub_command_args.cat {
-        Some(token) => token.clone(),
-        None => {
-            // Try to load from file
-            match token_storage::get_token_for_mint(work_dir, &mint_url).await {
-                Ok(Some(token_data)) => {
-                    println!("Using access token from cashu_tokens.json");
-                    token_data.access_token
-                }
-                Ok(None) => {
-                    return Err(anyhow::anyhow!(
-                        "No access token provided and no token found in cashu_tokens.json for this mint"
-                    ));
-                }
-                Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to read token from cashu_tokens.json: {}",
-                        e
-                    ));
-                }
-            }
-        }
-    };
+    // // Try to get the token from the provided argument or from the stored file
+    // let cat = match &sub_command_args.cat {
+    //     Some(token) => token.clone(),
+    //     None => {
+    //         // Try to load from file
+    //         match token_storage::get_token_for_mint(work_dir, &mint_url).await {
+    //             Ok(Some(token_data)) => {
+    //                 println!("Using access token from cashu_tokens.json");
+    //                 token_data.access_token
+    //             }
+    //             Ok(None) => {
+    //                 return Err(anyhow::anyhow!(
+    //                     "No access token provided and no token found in cashu_tokens.json for this mint"
+    //                 ));
+    //             }
+    //             Err(e) => {
+    //                 return Err(anyhow::anyhow!(
+    //                     "Failed to read token from cashu_tokens.json: {}",
+    //                     e
+    //                 ));
+    //             }
+    //         }
+    //     }
+    // };
 
     // Try to set the access token
-    if let Err(err) = wallet.set_cat(cat.clone()).await {
-        tracing::error!("Could not set cat: {}", err);
+    // if let Err(err) = wallet.set_cat(cat.clone()).await {
+    //     tracing::error!("Could not set cat: {}", err);
 
-        // Try to refresh the token if we have a refresh token
-        if let Ok(Some(token_data)) = token_storage::get_token_for_mint(work_dir, &mint_url).await {
-            println!("Attempting to refresh the access token...");
+    //     // Try to refresh the token if we have a refresh token
+    //     if let Ok(Some(token_data)) = token_storage::get_token_for_mint(work_dir, &mint_url).await {
+    //         println!("Attempting to refresh the access token...");
 
-            // Get the mint info to access OIDC configuration
-            if let Some(mint_info) = wallet.fetch_mint_info().await? {
-                match refresh_access_token(&mint_info, &token_data.refresh_token).await {
-                    Ok((new_access_token, new_refresh_token)) => {
-                        println!("Successfully refreshed access token");
+    //         // Get the mint info to access OIDC configuration
+    //         if let Some(mint_info) = wallet.fetch_mint_info().await? {
+    //             match refresh_access_token(&mint_info, &token_data.refresh_token).await {
+    //                 Ok((new_access_token, new_refresh_token)) => {
+    //                     println!("Successfully refreshed access token");
 
-                        // Save the new tokens
-                        if let Err(e) = token_storage::save_tokens(
-                            work_dir,
-                            &mint_url,
-                            &new_access_token,
-                            &new_refresh_token,
-                        )
-                        .await
-                        {
-                            println!("Warning: Failed to save refreshed tokens: {e}");
-                        }
+    //                     // Save the new tokens
+    //                     if let Err(e) = token_storage::save_tokens(
+    //                         work_dir,
+    //                         &mint_url,
+    //                         &new_access_token,
+    //                         &new_refresh_token,
+    //                     )
+    //                     .await
+    //                     {
+    //                         println!("Warning: Failed to save refreshed tokens: {e}");
+    //                     }
 
-                        // Try setting the new access token
-                        if let Err(err) = wallet.set_cat(new_access_token).await {
-                            tracing::error!("Could not set refreshed cat: {}", err);
-                            return Err(anyhow::anyhow!(
-                                "Authentication failed even after token refresh"
-                            ));
-                        }
+    //                     // Try setting the new access token
+    //                     if let Err(err) = wallet.set_cat(new_access_token).await {
+    //                         tracing::error!("Could not set refreshed cat: {}", err);
+    //                         return Err(anyhow::anyhow!(
+    //                             "Authentication failed even after token refresh"
+    //                         ));
+    //                     }
 
-                        // Set the refresh token
-                        wallet.set_refresh_token(new_refresh_token).await?;
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to refresh token: {}", e);
-                        return Err(anyhow::anyhow!("Failed to refresh access token: {}", e));
-                    }
-                }
-            }
-        } else {
-            return Err(anyhow::anyhow!(
-                "Authentication failed and no refresh token available"
-            ));
-        }
-    } else {
-        // If we have a refresh token, set it
-        if let Ok(Some(token_data)) = token_storage::get_token_for_mint(work_dir, &mint_url).await {
-            tracing::info!("Attempting to use refresh access token to refresh auth token");
-            wallet.set_refresh_token(token_data.refresh_token).await?;
-            wallet.refresh_access_token().await?;
-        }
-    }
+    //                     // Set the refresh token
+    //                     wallet.set_refresh_token(new_refresh_token).await?;
+    //                 }
+    //                 Err(e) => {
+    //                     tracing::error!("Failed to refresh token: {}", e);
+    //                     return Err(anyhow::anyhow!("Failed to refresh access token: {}", e));
+    //                 }
+    //             }
+    //         }
+    //     } else {
+    //         return Err(anyhow::anyhow!(
+    //             "Authentication failed and no refresh token available"
+    //         ));
+    //     }
+    // } else {
+    //     // If we have a refresh token, set it
+    //     if let Ok(Some(token_data)) = token_storage::get_token_for_mint(work_dir, &mint_url).await {
+    //         tracing::info!("Attempting to use refresh access token to refresh auth token");
+    //         wallet.set_refresh_token(token_data.refresh_token).await?;
+    //         wallet.refresh_access_token().await?;
+    //     }
+    // }
 
     println!("Attempting to mint blind auth");
 

@@ -15,6 +15,8 @@ use axum::routing::{get, post};
 use axum::Router;
 use cache::HttpCache;
 use cdk::mint::Mint;
+use portal::nostr::key::{Keys, PublicKey};
+use portal::protocol::LocalKeypair;
 use router_handlers::*;
 
 mod metrics;
@@ -23,6 +25,7 @@ mod metrics;
 mod auth;
 mod bolt12_router;
 pub mod cache;
+mod portal_router;
 mod router_handlers;
 mod ws;
 
@@ -56,17 +59,21 @@ mod swagger_imports {
 
 #[cfg(feature = "swagger")]
 use swagger_imports::*;
+use tokio::sync::Mutex;
 
 use crate::bolt12_router::{
     cache_post_melt_bolt12, cache_post_mint_bolt12, get_check_mint_bolt12_quote,
     post_melt_bolt12_quote, post_mint_bolt12_quote,
 };
+use crate::portal_router::get_portal_auth;
 
 /// CDK Mint State
 #[derive(Clone)]
 pub struct MintState {
     mint: Arc<Mint>,
     cache: Arc<cache::HttpCache>,
+    portal: Arc<sdk::PortalSDK>,
+    portal_key: Arc<Mutex<Option<PublicKey>>>,
 }
 
 #[cfg(feature = "swagger")]
@@ -281,10 +288,23 @@ pub async fn create_mint_router_with_custom_cache(
     cache: HttpCache,
     include_bolt12: bool,
 ) -> Result<Router> {
+    let secret = Keys::generate();
+    let local_keypair = LocalKeypair::new(secret, None);
+
+    let p = sdk::PortalSDK::new(local_keypair, vec!["wss://relay.getportal.cc".to_string()])
+        .await
+        .unwrap();
     let state = MintState {
         mint,
         cache: Arc::new(cache),
+        portal: Arc::new(p),
+        portal_key: Arc::new(Mutex::new(None)),
     };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
 
     let v1_router = Router::new()
         .route("/keys", get(get_keys))
@@ -306,7 +326,8 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/melt/bolt11", post(cache_post_melt_bolt11))
         .route("/checkstate", post(post_check))
         .route("/info", get(get_mint_info))
-        .route("/restore", post(post_restore));
+        .route("/restore", post(post_restore))
+        .route("/portal", get(get_portal_auth));
 
     let mint_router = Router::new().nest("/v1", v1_router);
 

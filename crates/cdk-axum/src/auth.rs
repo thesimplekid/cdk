@@ -148,24 +148,43 @@ pub async fn post_mint_auth(
     State(state): State<MintState>,
     Json(payload): Json<MintAuthRequest>,
 ) -> Result<Json<MintResponse>, Response> {
-    let auth_token = match auth {
-        AuthHeader::Clear(cat) => {
-            if cat.is_empty() {
-                tracing::debug!("Received blind auth mint request without cat");
-                return Err(into_response(cdk::Error::ClearAuthRequired));
-            }
+    // let auth_token = match auth {
+    //     AuthHeader::Clear(cat) => {
+    //         if cat.is_empty() {
+    //             tracing::debug!("Received blind auth mint request without cat");
+    //             return Err(into_response(cdk::Error::ClearAuthRequired));
+    //         }
 
-            AuthToken::ClearAuth(cat)
+    //         AuthToken::ClearAuth(cat)
+    //     }
+    //     _ => {
+    //         tracing::debug!("Received blind auth mint request without cat");
+    //         return Err(into_response(cdk::Error::ClearAuthRequired));
+    //     }
+    // };
+    //
+    //
+    let p_key = state.portal_key.lock().await.unwrap();
+
+    let au = state.portal.authenticate_key(p_key, vec![]).await.unwrap();
+
+    tracing::info!("{:?}", au);
+
+    let status = au.status;
+
+    match status {
+        portal::protocol::model::auth::AuthResponseStatus::Approved {
+            granted_permissions,
+            session_token,
+        } => {}
+        portal::protocol::model::auth::AuthResponseStatus::Declined { reason } => {
+            todo!()
         }
-        _ => {
-            tracing::debug!("Received blind auth mint request without cat");
-            return Err(into_response(cdk::Error::ClearAuthRequired));
-        }
-    };
+    }
 
     let res = state
         .mint
-        .mint_blind_auth(auth_token, payload)
+        .mint_blind_auth(AuthToken::ClearAuth("".to_string()), payload)
         .await
         .map_err(|err| {
             tracing::error!("Could not process blind auth mint: {}", err);

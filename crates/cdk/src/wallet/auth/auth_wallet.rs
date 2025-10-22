@@ -359,39 +359,39 @@ impl AuthWallet {
             self.get_mint_info().await?;
         }
 
-        let auth_token = self.client.get_auth_token().await?;
+        // let auth_token = self.client.get_auth_token().await?;
 
-        match &auth_token {
-            AuthToken::ClearAuth(cat) => {
-                if cat.is_empty() {
-                    tracing::warn!("Auth Cat is not set");
-                    return Err(Error::ClearAuthRequired);
-                }
+        // match &auth_token {
+        //     AuthToken::ClearAuth(cat) => {
+        //         if cat.is_empty() {
+        //             tracing::warn!("Auth Cat is not set");
+        //             return Err(Error::ClearAuthRequired);
+        //         }
 
-                if let Err(err) = self.verify_cat(auth_token).await {
-                    tracing::warn!("Current cat is invalid {}", err);
-                }
+        //         if let Err(err) = self.verify_cat(auth_token).await {
+        //             tracing::warn!("Current cat is invalid {}", err);
+        //         }
 
-                let has_refresh;
+        //         let has_refresh;
 
-                {
-                    has_refresh = self.refresh_token.read().await.is_some();
-                }
+        //         {
+        //             has_refresh = self.refresh_token.read().await.is_some();
+        //         }
 
-                if has_refresh {
-                    tracing::info!("Attempting to refresh using refresh token");
-                    self.refresh_access_token().await?;
-                } else {
-                    tracing::warn!(
-                        "Wallet cat is invalid and there is no refresh token please reauth"
-                    );
-                }
-            }
-            AuthToken::BlindAuth(_) => {
-                tracing::error!("Blind auth set as client cat");
-                return Err(Error::ClearAuthFailed);
-            }
-        }
+        //         if has_refresh {
+        //             tracing::info!("Attempting to refresh using refresh token");
+        //             self.refresh_access_token().await?;
+        //         } else {
+        //             tracing::warn!(
+        //                 "Wallet cat is invalid and there is no refresh token please reauth"
+        //             );
+        //         }
+        //     }
+        //     AuthToken::BlindAuth(_) => {
+        //         tracing::error!("Blind auth set as client cat");
+        //         return Err(Error::ClearAuthFailed);
+        //     }
+        // }
 
         let keysets = self
             .load_mint_keysets()

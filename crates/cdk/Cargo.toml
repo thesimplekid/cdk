@@ -62,6 +62,7 @@ cdk-prometheus = {workspace = true, optional = true}
 web-time.workspace = true
 zeroize = "1"
 tokio-util.workspace = true
+sdk = { git = "https://github.com/PortalTechnologiesInc/lib", package = "sdk" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 hickory-resolver = { version = "0.25.2", optional = true, features = ["dnssec-ring"] }

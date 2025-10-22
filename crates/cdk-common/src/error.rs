@@ -77,6 +77,9 @@ pub enum Error {
     /// Mint time outside of tolerance
     #[error("Mint time outside of tolerance")]
     MintTimeExceedsTolerance,
+    /// Portal Auth Failed
+    #[error("Portal Auth Failed")]
+    PortalAuthFailed,
     /// Insufficient blind auth tokens
     #[error("Insufficient blind auth tokens, must reauth")]
     InsufficientBlindAuthTokens,

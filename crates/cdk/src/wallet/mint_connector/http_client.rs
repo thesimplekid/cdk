@@ -638,8 +638,6 @@ where
     #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
     async fn post_mint_blind_auth(&self, request: MintAuthRequest) -> Result<MintResponse, Error> {
         let url = self.mint_url.join_paths(&["v1", "auth", "blind", "mint"])?;
-        self.transport
-            .http_post(url, Some(self.cat.read().await.clone()), &request)
-            .await
+        self.transport.http_post(url, None, &request).await
     }
 }
