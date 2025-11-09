@@ -72,18 +72,29 @@ pub async fn decode_token(sub_command_args: &DecodeTokenSubCommand) -> Result<()
             token.unit().unwrap_or_default()
         );
 
-        // Check DLEQ validity
-        let proofs_with_dleq = proofs.iter().filter(|p| p.dleq.is_some()).count();
-        if proofs_with_dleq == proofs.len() {
-            println!("DLEQ: Valid (all proofs have DLEQ)");
-        } else if proofs_with_dleq > 0 {
-            println!(
-                "DLEQ: Partial ({}/{} proofs have DLEQ)",
-                proofs_with_dleq,
-                proofs.len()
-            );
-        } else {
-            println!("DLEQ: None");
+        // Verify DLEQ proofs
+        // Get unique keyset IDs and fetch keysets
+        let keyset_ids = proofs.keyset_ids();
+        let mut keysets = HashMap::new();
+        for keyset_id in keyset_ids {
+            match client.get_mint_keyset(keyset_id).await {
+                Ok(keyset) => {
+                    keysets.insert(keyset_id, keyset);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Could not fetch keyset {}: {}", keyset_id, e);
+                }
+            }
+        }
+
+        // Verify all DLEQs
+        match proofs.verify_dleqs(&keysets) {
+            Ok(()) => {
+                println!("DLEQ: ✓ All {} proofs verified successfully", proofs.len());
+            }
+            Err(e) => {
+                println!("DLEQ: ✗ Verification failed - {}", e);
+            }
         }
     } else {
         // Only print raw data if --info flag is not used

@@ -56,6 +56,19 @@ pub trait ProofsMethods {
 
     /// Create a copy of proofs without dleqs
     fn without_dleqs(&self) -> Proofs;
+
+    /// Get unique keyset IDs from proofs
+    fn keyset_ids(&self) -> HashSet<Id>;
+
+    /// Verify DLEQs for all proofs
+    ///
+    /// # Arguments
+    /// * `keysets` - Map of keyset ID to KeySet containing the mint's public keys
+    ///
+    /// # Returns
+    /// * `Ok(())` if all proofs have valid DLEQs
+    /// * `Err` if any proofs are missing DLEQs or have invalid DLEQs
+    fn verify_dleqs(&self, keysets: &HashMap<Id, super::nut02::KeySet>) -> Result<(), Error>;
 }
 
 impl ProofsMethods for Proofs {
@@ -83,6 +96,14 @@ impl ProofsMethods for Proofs {
                 p
             })
             .collect()
+    }
+
+    fn keyset_ids(&self) -> HashSet<Id> {
+        keyset_ids(self.iter())
+    }
+
+    fn verify_dleqs(&self, keysets: &HashMap<Id, super::nut02::KeySet>) -> Result<(), Error> {
+        verify_dleqs(self.iter(), keysets)
     }
 }
 
@@ -112,9 +133,20 @@ impl ProofsMethods for HashSet<Proof> {
             })
             .collect()
     }
+
+    fn keyset_ids(&self) -> HashSet<Id> {
+        keyset_ids(self.iter())
+    }
+
+    fn verify_dleqs(&self, keysets: &HashMap<Id, super::nut02::KeySet>) -> Result<(), Error> {
+        verify_dleqs(self.iter(), keysets)
+    }
 }
 
-fn count_by_keyset<'a, I: Iterator<Item = &'a Proof>>(proofs: I) -> HashMap<Id, u64> {
+fn count_by_keyset<'a, I>(proofs: I) -> HashMap<Id, u64>
+where
+    I: Iterator<Item = &'a Proof>,
+{
     let mut counts = HashMap::new();
     for proof in proofs {
         *counts.entry(proof.keyset_id).or_insert(0) += 1;
@@ -122,7 +154,10 @@ fn count_by_keyset<'a, I: Iterator<Item = &'a Proof>>(proofs: I) -> HashMap<Id, 
     counts
 }
 
-fn sum_by_keyset<'a, I: Iterator<Item = &'a Proof>>(proofs: I) -> HashMap<Id, Amount> {
+fn sum_by_keyset<'a, I>(proofs: I) -> HashMap<Id, Amount>
+where
+    I: Iterator<Item = &'a Proof>,
+{
     let mut sums = HashMap::new();
     for proof in proofs {
         *sums.entry(proof.keyset_id).or_insert(Amount::ZERO) += proof.amount;
@@ -130,12 +165,60 @@ fn sum_by_keyset<'a, I: Iterator<Item = &'a Proof>>(proofs: I) -> HashMap<Id, Am
     sums
 }
 
-fn total_amount<'a, I: Iterator<Item = &'a Proof>>(proofs: I) -> Result<Amount, Error> {
+fn total_amount<'a, I>(proofs: I) -> Result<Amount, Error>
+where
+    I: Iterator<Item = &'a Proof>,
+{
     Amount::try_sum(proofs.map(|p| p.amount)).map_err(Into::into)
 }
 
-fn ys<'a, I: Iterator<Item = &'a Proof>>(proofs: I) -> Result<Vec<PublicKey>, Error> {
+fn ys<'a, I>(proofs: I) -> Result<Vec<PublicKey>, Error>
+where
+    I: Iterator<Item = &'a Proof>,
+{
     proofs.map(|p| p.y()).collect::<Result<Vec<PublicKey>, _>>()
+}
+
+fn keyset_ids<'a, I>(proofs: I) -> HashSet<Id>
+where
+    I: Iterator<Item = &'a Proof>,
+{
+    proofs.map(|p| p.keyset_id).collect()
+}
+
+fn verify_dleqs<'a, I>(proofs: I, keysets: &HashMap<Id, super::nut02::KeySet>) -> Result<(), Error>
+where
+    I: Iterator<Item = &'a Proof>,
+{
+    let mut missing = 0;
+
+    for proof in proofs {
+        // Check if DLEQ is present
+        if proof.dleq.is_none() {
+            missing += 1;
+            continue;
+        }
+
+        // Get the keyset for this proof
+        let keyset = keysets
+            .get(&proof.keyset_id)
+            .ok_or(Error::KeysetNotFound(proof.keyset_id))?;
+
+        // Get the public key for this proof's amount
+        let mint_pubkey = keyset
+            .keys
+            .amount_key(proof.amount)
+            .ok_or(Error::AmountKeyNotFound(proof.amount, proof.keyset_id))?;
+
+        // Verify the DLEQ (this will return Err if invalid)
+        proof.verify_dleq(mint_pubkey)?;
+    }
+
+    if missing > 0 {
+        Err(Error::DleqVerificationFailed(0, missing))
+    } else {
+        Ok(())
+    }
 }
 
 /// NUT00 Error
@@ -156,6 +239,15 @@ pub enum Error {
     /// Duplicate proofs in token
     #[error("Duplicate proofs in token")]
     DuplicateProofs,
+    /// DLEQ verification failed
+    #[error("DLEQ verification failed: {0} invalid, {1} missing")]
+    DleqVerificationFailed(usize, usize),
+    /// Keyset not found
+    #[error("Keyset {0} not found")]
+    KeysetNotFound(Id),
+    /// Amount key not found
+    #[error("Amount {0} not found in keyset {1}")]
+    AmountKeyNotFound(Amount, Id),
     /// Serde Json error
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),
@@ -186,6 +278,9 @@ pub enum Error {
     /// NUT11 error
     #[error(transparent)]
     NUT11(#[from] crate::nuts::nut11::Error),
+    /// NUT12 error
+    #[error(transparent)]
+    NUT12(#[from] crate::nuts::nut12::Error),
     /// Short keyset id -> id error
     #[error(transparent)]
     NUT02(#[from] crate::nuts::nut02::Error),
