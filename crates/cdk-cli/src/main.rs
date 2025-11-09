@@ -230,7 +230,7 @@ async fn main() -> Result<()> {
 
     match &args.command {
         Commands::DecodeToken(sub_command_args) => {
-            sub_commands::decode_token::decode_token(sub_command_args)
+            sub_commands::decode_token::decode_token(sub_command_args).await
         }
         Commands::Balance => sub_commands::balance::balance(&multi_mint_wallet).await,
         Commands::Melt(sub_command_args) => {
