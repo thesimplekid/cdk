@@ -22,7 +22,6 @@ pub enum Error {
     InvalidMeltQuoteTransition(MeltQuoteState, MeltQuoteState),
 }
 
-#[inline]
 /// Check if the state transition is allowed
 pub fn check_state_transition(current_state: State, new_state: State) -> Result<(), Error> {
     let is_valid_transition = match current_state {
@@ -44,7 +43,6 @@ pub fn check_state_transition(current_state: State, new_state: State) -> Result<
     }
 }
 
-#[inline]
 /// Check if the melt quote state transition is allowed
 ///
 /// Valid transitions:

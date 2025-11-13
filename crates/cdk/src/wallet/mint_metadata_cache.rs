@@ -223,7 +223,6 @@ impl MintMetadataCache {
     /// // Force refresh from mint (ignores cache)
     /// let fresh = cache.load_from_mint(&storage, &client).await?;
     /// ```
-    #[inline(always)]
     pub async fn load_from_mint(
         &self,
         storage: &Arc<dyn WalletDatabase<Err = database::Error> + Send + Sync>,
@@ -286,7 +285,6 @@ impl MintMetadataCache {
     /// // Use cached data if available, fetch if not
     /// let metadata = cache.load(&storage, &client).await?;
     /// ```
-    #[inline(always)]
     pub async fn load(
         &self,
         storage: &Arc<dyn WalletDatabase<Err = database::Error> + Send + Sync>,

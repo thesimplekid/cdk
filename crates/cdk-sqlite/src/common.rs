@@ -133,7 +133,6 @@ impl From<(&str, &str)> for Config {
 }
 
 /// Convert cdk_sql_common::value::Value to rusqlite Value
-#[inline(always)]
 pub fn to_sqlite(v: Value) -> rusqlite::types::Value {
     match v {
         Value::Blob(blob) => rusqlite::types::Value::Blob(blob),
@@ -145,7 +144,6 @@ pub fn to_sqlite(v: Value) -> rusqlite::types::Value {
 }
 
 /// Convert from rusqlite Valute to cdk_sql_common::value::Value
-#[inline(always)]
 pub fn from_sqlite(v: rusqlite::types::Value) -> Value {
     match v {
         rusqlite::types::Value::Blob(blob) => Value::Blob(blob),

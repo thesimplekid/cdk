@@ -8,7 +8,6 @@ use tokio::time::{timeout, Duration};
 use super::Wallet;
 
 impl Wallet {
-    #[inline(always)]
     /// Mints a mint quote once it is paid
     pub async fn wait_and_mint_quote(
         &self,

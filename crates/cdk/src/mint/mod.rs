@@ -127,7 +127,6 @@ impl Mint {
     }
 
     /// Internal function to create a new [`Mint`] with shared logic
-    #[inline]
     async fn new_internal(
         mint_info: MintInfo,
         signatory: Arc<dyn Signatory + Send + Sync>,

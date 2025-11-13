@@ -273,7 +273,6 @@ impl Statement {
     }
 
     /// Binds a given placeholder to a value.
-    #[inline]
     pub fn bind<C, V>(mut self, name: C, value: V) -> Self
     where
         C: ToString,
@@ -298,7 +297,6 @@ impl Statement {
     ///
     /// This will rewrite the function from `:foo` (where value is vec![1, 2, 3]) to `:foo0, :foo1,
     /// :foo2` and binds each value from the value vector accordingly.
-    #[inline]
     pub fn bind_vec<C, V>(mut self, name: C, value: Vec<V>) -> Self
     where
         C: ToString,
@@ -364,7 +362,6 @@ impl Statement {
 }
 
 /// Creates a new query statement
-#[inline(always)]
 pub fn query(sql: &str) -> Result<Statement, Error> {
     static CACHE: Lazy<Arc<RwLock<Cache>>> = Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
     Statement::new(sql, CACHE.clone()).map_err(|e| Error::Database(Box::new(e)))

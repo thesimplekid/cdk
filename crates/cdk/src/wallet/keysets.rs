@@ -37,7 +37,6 @@ impl Wallet {
     /// Checks the metadata cache for keysets. If cache is not populated,
     /// fetches from mint and updates cache. Returns error if no active keysets found.
     #[instrument(skip(self))]
-    #[inline(always)]
     pub async fn get_mint_keysets(&self) -> Result<Vec<KeySetInfo>, Error> {
         let keysets = self
             .metadata_cache

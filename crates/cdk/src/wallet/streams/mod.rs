@@ -90,7 +90,7 @@ impl WaitableEvent {
 
 impl Wallet {
     /// Streams all proofs from a single mint quote
-    #[inline(always)]
+    #[inline]
     pub fn proof_stream(
         &self,
         quote: MintQuote,
@@ -101,7 +101,7 @@ impl Wallet {
     }
 
     /// Streams all new proofs for a set of mints
-    #[inline(always)]
+    #[inline]
     pub fn mints_proof_stream(
         &self,
         quotes: Vec<MintQuote>,

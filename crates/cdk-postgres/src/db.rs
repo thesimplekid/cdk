@@ -7,7 +7,6 @@ use tokio_postgres::{Client, Error as PgError};
 
 use crate::value::PgValue;
 
-#[inline(always)]
 fn to_pgsql_error(err: PgError) -> Error {
     if let Some(err) = err.as_db_error() {
         let code = err.code().to_owned();
@@ -19,14 +18,12 @@ fn to_pgsql_error(err: PgError) -> Error {
     Error::Database(Box::new(err))
 }
 
-#[inline(always)]
 pub async fn pg_batch(conn: &Client, statement: Statement) -> Result<(), Error> {
     let (sql, _placeholder_values) = statement.to_sql()?;
 
     run_db_operation(&sql, conn.batch_execute(&sql), to_pgsql_error).await
 }
 
-#[inline(always)]
 pub async fn pg_execute(conn: &Client, statement: Statement) -> Result<usize, Error> {
     let (sql, placeholder_values) = statement.to_sql()?;
     let prepared_statement = conn.prepare(&sql).await.map_err(to_pgsql_error)?;
@@ -49,7 +46,6 @@ pub async fn pg_execute(conn: &Client, statement: Statement) -> Result<usize, Er
     .await
 }
 
-#[inline(always)]
 pub async fn pg_fetch_one(
     conn: &Client,
     statement: Statement,
@@ -87,7 +83,6 @@ pub async fn pg_fetch_one(
     .await
 }
 
-#[inline(always)]
 pub async fn pg_fetch_all(conn: &Client, statement: Statement) -> Result<Vec<Vec<Column>>, Error> {
     let (sql, placeholder_values) = statement.to_sql()?;
     let prepared_statement = conn.prepare(&sql).await.map_err(to_pgsql_error)?;
@@ -123,7 +118,6 @@ pub async fn pg_fetch_all(conn: &Client, statement: Statement) -> Result<Vec<Vec
     .await
 }
 
-#[inline(always)]
 pub async fn pg_pluck(conn: &Client, statement: Statement) -> Result<Option<Column>, Error> {
     let (sql, placeholder_values) = statement.to_sql()?;
     let prepared_statement = conn.prepare(&sql).await.map_err(to_pgsql_error)?;

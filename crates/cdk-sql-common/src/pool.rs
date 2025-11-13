@@ -162,7 +162,6 @@ where
     }
 
     /// Similar to get_timeout but uses the default timeout value.
-    #[inline(always)]
     pub fn get(self: &Arc<Self>) -> Result<PooledResource<RM>, Error<RM::Error>> {
         self.get_timeout(self.default_timeout)
     }
@@ -183,7 +182,6 @@ where
     ///
     /// This function will return a free resource or create a new one if there is still room for it;
     /// otherwise, it will wait for a resource to be released for reuse.
-    #[inline(always)]
     pub fn get_timeout(
         self: &Arc<Self>,
         timeout: Duration,

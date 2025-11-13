@@ -44,7 +44,6 @@ impl AsyncSqlite {
     }
 }
 
-#[inline(always)]
 fn to_sqlite_error(err: SqliteError) -> Error {
     tracing::error!("Failed query with error {:?}", err);
     if let rusqlite::Error::SqliteFailure(

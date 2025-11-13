@@ -307,7 +307,6 @@ where
         Ok(())
     }
 
-    #[inline(always)]
     fn message_to_stream(&self, message: StreamCtrl<T::Spec>) -> Result<(), Error> {
         let to_stream = self.stream_ctrl.read();
 

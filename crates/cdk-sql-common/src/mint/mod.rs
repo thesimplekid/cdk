@@ -78,7 +78,6 @@ where
     inner: ConnectionWithTransaction<RM::Connection, PooledResource<RM>>,
 }
 
-#[inline(always)]
 async fn get_current_states<C>(
     conn: &C,
     ys: &[PublicKey],
@@ -328,7 +327,6 @@ where
     }
 }
 
-#[inline(always)]
 async fn get_mint_quote_payments<C>(
     conn: &C,
     quote_id: &QuoteId,
@@ -365,7 +363,6 @@ where
     .collect()
 }
 
-#[inline(always)]
 async fn get_mint_quote_issuance<C>(conn: &C, quote_id: &QuoteId) -> Result<Vec<Issuance>, Error>
 where
     C: DatabaseExecutor + Send + Sync,

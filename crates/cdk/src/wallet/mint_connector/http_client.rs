@@ -135,7 +135,6 @@ where
     /// Generic implementation of a retriable http request
     ///
     /// The retry only happens if the mint supports replay through the Caching of NUT-19.
-    #[inline(always)]
     async fn retriable_http_request<P, R>(
         &self,
         method: nut19::Method,

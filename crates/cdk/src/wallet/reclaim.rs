@@ -70,7 +70,6 @@ impl Wallet {
 
     /// Perform an async task, which is assumed to be a foreign mint call that can fail. If fails,
     /// the proofs used in the request are synchronize with the mint and update it locally
-    #[inline(always)]
     pub(crate) fn try_proof_operation_or_reclaim<'a, F, R>(
         &'a self,
         inputs: Proofs,

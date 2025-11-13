@@ -11,7 +11,6 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::{MintSubTopics, SubscriptionClient};
 
-#[inline(always)]
 pub(crate) async fn stream_client(
     client: &SubscriptionClient,
     mut ctrl: mpsc::Receiver<StreamCtrl<MintSubTopics>>,

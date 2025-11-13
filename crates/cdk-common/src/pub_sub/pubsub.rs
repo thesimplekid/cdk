@@ -61,7 +61,6 @@ where
     }
 
     /// Publish an event to all listenrs
-    #[inline(always)]
     fn publish_internal(event: S::Event, listeners_index: &TopicTree<S>) -> Result<(), Error> {
         let index_storage = listeners_index.read();
 
@@ -85,7 +84,6 @@ where
     }
 
     /// Broadcast an event to all listeners
-    #[inline(always)]
     pub fn publish<E>(&self, event: E)
     where
         E: Into<S::Event>,
@@ -102,7 +100,6 @@ where
     ///
     /// This function takes an Arc to the storage struct, the event_id, the kind
     /// and the vent to broadcast
-    #[inline(always)]
     pub fn publish_now<E>(&self, event: E) -> Result<(), Error>
     where
         E: Into<S::Event>,
@@ -112,7 +109,6 @@ where
     }
 
     /// Subscribe proving custom sender/receiver mpsc
-    #[inline(always)]
     pub fn subscribe_with<I>(
         &self,
         request: I,
