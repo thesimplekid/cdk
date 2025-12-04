@@ -67,6 +67,8 @@ where
         Ok(())
     }
 
+    // FIXME: Replace unwrap with proper error handling
+    #[allow(clippy::unwrap_used)]
     async fn add_keyset_u32<T>(conn: &T) -> Result<(), Error>
     where
         T: DatabaseExecutor,
@@ -711,6 +713,8 @@ ON CONFLICT(id) DO UPDATE SET
         Ok(())
     }
 
+    // FIXME: Replace unwrap with proper error handling
+    #[allow(clippy::unwrap_used)]
     async fn update_proofs(
         &self,
         added: Vec<ProofInfo>,

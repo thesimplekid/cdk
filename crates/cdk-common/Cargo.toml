@@ -58,3 +58,6 @@ criterion.workspace = true
 [[bench]]
 name = "transaction_id_benchmark"
 harness = false
+
+[lints]
+workspace = true
