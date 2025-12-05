@@ -67,7 +67,6 @@ where
         Ok(())
     }
 
-    // FIXME: Replace unwrap with proper error handling
     async fn add_keyset_u32<T>(conn: &T) -> Result<(), Error>
     where
         T: DatabaseExecutor,
@@ -84,8 +83,9 @@ where
         .fetch_all(conn)
         .await?;
 
-        for id in keys_without_u32 {
-            let id = column_as_string!(id.first().unwrap());
+        for row in keys_without_u32 {
+            unpack_into!(let (id) = row);
+            let id = column_as_string!(id);
 
             if let Ok(id) = Id::from_str(&id) {
                 query(
@@ -115,8 +115,9 @@ where
         .fetch_all(conn)
         .await?;
 
-        for id in keysets_without_u32 {
-            let id = column_as_string!(id.first().unwrap());
+        for row in keysets_without_u32 {
+            unpack_into!(let (id) = row);
+            let id = column_as_string!(id);
 
             if let Ok(id) = Id::from_str(&id) {
                 query(
@@ -712,7 +713,6 @@ ON CONFLICT(id) DO UPDATE SET
         Ok(())
     }
 
-    // FIXME: Replace unwrap with proper error handling
     async fn update_proofs(
         &self,
         added: Vec<ProofInfo>,
@@ -765,7 +765,9 @@ ON CONFLICT(id) DO UPDATE SET
                 proof
                     .proof
                     .witness
-                    .map(|w| serde_json::to_string(&w).unwrap()),
+                    .and_then(|w| serde_json::to_string(&w)
+                        .inspect_err(|e| tracing::error!("Failed to serialize witness: {:?}", e))
+                        .ok()),
             )
             .bind(
                 "dleq_e",
