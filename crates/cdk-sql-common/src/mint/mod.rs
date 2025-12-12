@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use bitcoin::bip32::DerivationPath;
 use cdk_common::database::mint::{validate_kvstore_params, SagaDatabase, SagaTransaction};
 use cdk_common::database::{
-    self, ConversionError, Error, MintDatabase, MintDbWriterFinalizer, MintKeyDatabaseTransaction,
+    self, ConversionError, DbTransactionFinalizer, Error, MintDatabase, MintKeyDatabaseTransaction,
     MintKeysDatabase, MintProofsDatabase, MintQuotesDatabase, MintQuotesTransaction,
     MintSignatureTransaction, MintSignaturesDatabase,
 };
@@ -179,7 +179,7 @@ where
             .bind("c", proof.c.to_bytes().to_vec())
             .bind(
                 "witness",
-                proof.witness.map(|w| serde_json::to_string(&w).unwrap()),
+                proof.witness.and_then(|w| serde_json::to_string(&w).inspect_err(|e| tracing::error!("Failed to serialize witness: {:?}", e)).ok()),
             )
             .bind("state", "UNSPENT".to_string())
             .bind("quote_id", quote_id.clone().map(|q| q.to_string()))
@@ -330,7 +330,7 @@ impl<RM> database::MintTransaction<'_, Error> for SQLTransaction<RM> where RM: D
 {}
 
 #[async_trait]
-impl<RM> MintDbWriterFinalizer for SQLTransaction<RM>
+impl<RM> DbTransactionFinalizer for SQLTransaction<RM>
 where
     RM: DatabasePool + 'static,
 {
@@ -2455,6 +2455,7 @@ fn sql_row_to_mint_quote(
     ))
 }
 
+// FIXME: Replace unwrap with proper error handling
 fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
     unpack_into!(
         let (
@@ -2519,7 +2520,8 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
                 "Melt quote from pre migrations defaulting to bolt11 {}.",
                 err
             );
-            let bolt11 = Bolt11Invoice::from_str(&request).unwrap();
+            let bolt11 = Bolt11Invoice::from_str(&request)
+                .map_err(|e| Error::Internal(format!("Could not parse invoice: {e}")))?;
             MeltPaymentRequest::Bolt11 { bolt11 }
         }
     };

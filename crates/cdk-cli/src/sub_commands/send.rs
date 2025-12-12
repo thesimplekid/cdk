@@ -68,7 +68,7 @@ pub async fn send(
     let selected_mint = if let Some(mint_url) = &sub_command_args.mint_url {
         Some(MintUrl::from_str(mint_url)?)
     } else {
-        // Display all mints with their balances and let user select
+        // Get all mints with their balances
         let balances_map = multi_mint_wallet.get_balances().await?;
         if balances_map.is_empty() {
             return Err(anyhow!("No mints available in the wallet"));
@@ -76,34 +76,40 @@ pub async fn send(
 
         let balances_vec: Vec<(MintUrl, Amount)> = balances_map.into_iter().collect();
 
-        println!("\nAvailable mints and balances:");
-        for (index, (mint_url, balance)) in balances_vec.iter().enumerate() {
-            println!(
-                "  {}: {} - {} {}",
-                index,
-                mint_url,
-                balance,
-                multi_mint_wallet.unit()
-            );
+        // If only one mint exists, automatically select it
+        if balances_vec.len() == 1 {
+            Some(balances_vec[0].0.clone())
+        } else {
+            // Display all mints with their balances and let user select
+            println!("\nAvailable mints and balances:");
+            for (index, (mint_url, balance)) in balances_vec.iter().enumerate() {
+                println!(
+                    "  {}: {} - {} {}",
+                    index,
+                    mint_url,
+                    balance,
+                    multi_mint_wallet.unit()
+                );
+            }
+            println!("  {}: Any mint (auto-select best)", balances_vec.len());
+
+            let selection = loop {
+                let selection: usize =
+                    get_number_input("Enter mint number to send from (or select Any)")?;
+
+                if selection == balances_vec.len() {
+                    break None; // "Any" option selected
+                }
+
+                if let Some((mint_url, _)) = balances_vec.get(selection) {
+                    break Some(mint_url.clone());
+                }
+
+                println!("Invalid selection, please try again.");
+            };
+
+            selection
         }
-        println!("  {}: Any mint (auto-select best)", balances_vec.len());
-
-        let selection = loop {
-            let selection: usize =
-                get_number_input("Enter mint number to send from (or select Any)")?;
-
-            if selection == balances_vec.len() {
-                break None; // "Any" option selected
-            }
-
-            if let Some((mint_url, _)) = balances_vec.get(selection) {
-                break Some(mint_url.clone());
-            }
-
-            println!("Invalid selection, please try again.");
-        };
-
-        selection
     };
 
     let token_amount = Amount::from(get_number_input::<u64>(&format!(
@@ -133,8 +139,8 @@ pub async fn send(
                     sub_command_args
                         .pubkey
                         .iter()
-                        .map(|p| PublicKey::from_str(p).unwrap())
-                        .collect(),
+                        .map(|p| PublicKey::from_str(p))
+                        .collect::<Result<Vec<_>, _>>()?,
                 ),
             };
 
@@ -144,8 +150,8 @@ pub async fn send(
                     sub_command_args
                         .refund_keys
                         .iter()
-                        .map(|p| PublicKey::from_str(p).unwrap())
-                        .collect(),
+                        .map(|p| PublicKey::from_str(p))
+                        .collect::<Result<Vec<_>, _>>()?,
                 ),
             };
 
@@ -156,8 +162,7 @@ pub async fn send(
                 sub_command_args.required_sigs,
                 None,
                 None,
-            )
-            .unwrap();
+            )?;
 
             Some(SpendingConditions::new_htlc(
                 preimage.clone(),
@@ -171,8 +176,8 @@ pub async fn send(
                     sub_command_args
                         .pubkey
                         .iter()
-                        .map(|p| PublicKey::from_str(p).unwrap())
-                        .collect(),
+                        .map(|p| PublicKey::from_str(p))
+                        .collect::<Result<Vec<_>, _>>()?,
                 ),
             };
 
@@ -182,8 +187,8 @@ pub async fn send(
                     sub_command_args
                         .refund_keys
                         .iter()
-                        .map(|p| PublicKey::from_str(p).unwrap())
-                        .collect(),
+                        .map(|p| PublicKey::from_str(p))
+                        .collect::<Result<Vec<_>, _>>()?,
                 ),
             };
 
@@ -204,14 +209,14 @@ pub async fn send(
                 let pubkeys: Vec<PublicKey> = sub_command_args
                     .pubkey
                     .iter()
-                    .map(|p| PublicKey::from_str(p).unwrap())
-                    .collect();
+                    .map(|p| PublicKey::from_str(p))
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let refund_keys: Vec<PublicKey> = sub_command_args
                     .refund_keys
                     .iter()
-                    .map(|p| PublicKey::from_str(p).unwrap())
-                    .collect();
+                    .map(|p| PublicKey::from_str(p))
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let refund_keys = (!refund_keys.is_empty()).then_some(refund_keys);
 

@@ -27,7 +27,7 @@ pub struct MultiMintWallet {
 
 #[uniffi::export(async_runtime = "tokio")]
 impl MultiMintWallet {
-    /// Create a new MultiMintWallet from mnemonic using WalletDatabase trait
+    /// Create a new MultiMintWallet from mnemonic using WalletDatabaseFfi trait
     #[uniffi::constructor]
     pub fn new(
         unit: CurrencyUnit,
@@ -188,7 +188,8 @@ impl MultiMintWallet {
             // This is a best-effort operation
             cdk::mint_url::MintUrl::from_str(&url_str).unwrap_or_else(|_| {
                 // Last resort: create a dummy URL that won't match anything
-                cdk::mint_url::MintUrl::from_str("https://invalid.mint").unwrap()
+                cdk::mint_url::MintUrl::from_str("https://invalid.mint")
+                    .expect("Valid hardcoded URL")
             })
         });
         self.inner.remove_mint(&cdk_mint_url).await;
