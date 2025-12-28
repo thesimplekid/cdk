@@ -206,3 +206,71 @@ where
     .map(|row| Ok(column_as_string!(&row[0])))
     .collect::<Result<Vec<_>, Error>>()
 }
+
+/// Generic implementation of kv_write for database (non-transactional, standalone)
+pub(crate) async fn kv_write_standalone<C>(
+    conn: &C,
+    primary_namespace: &str,
+    secondary_namespace: &str,
+    key: &str,
+    value: &[u8],
+) -> Result<(), Error>
+where
+    C: crate::database::DatabaseExecutor,
+{
+    // Validate parameters according to KV store requirements
+    validate_kvstore_params(primary_namespace, secondary_namespace, Some(key))?;
+
+    let current_time = unix_time();
+
+    query(
+        r#"
+        INSERT INTO kv_store
+        (primary_namespace, secondary_namespace, key, value, created_time, updated_time)
+        VALUES (:primary_namespace, :secondary_namespace, :key, :value, :created_time, :updated_time)
+        ON CONFLICT(primary_namespace, secondary_namespace, key)
+        DO UPDATE SET
+            value = excluded.value,
+            updated_time = excluded.updated_time
+        "#,
+    )?
+    .bind("primary_namespace", primary_namespace.to_owned())
+    .bind("secondary_namespace", secondary_namespace.to_owned())
+    .bind("key", key.to_owned())
+    .bind("value", value.to_vec())
+    .bind("created_time", current_time as i64)
+    .bind("updated_time", current_time as i64)
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
+
+/// Generic implementation of kv_remove for database (non-transactional, standalone)
+pub(crate) async fn kv_remove_standalone<C>(
+    conn: &C,
+    primary_namespace: &str,
+    secondary_namespace: &str,
+    key: &str,
+) -> Result<(), Error>
+where
+    C: crate::database::DatabaseExecutor,
+{
+    // Validate parameters according to KV store requirements
+    validate_kvstore_params(primary_namespace, secondary_namespace, Some(key))?;
+    query(
+        r#"
+        DELETE FROM kv_store
+        WHERE primary_namespace = :primary_namespace
+        AND secondary_namespace = :secondary_namespace
+        AND key = :key
+        "#,
+    )?
+    .bind("primary_namespace", primary_namespace.to_owned())
+    .bind("secondary_namespace", secondary_namespace.to_owned())
+    .bind("key", key.to_owned())
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
