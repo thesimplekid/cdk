@@ -6,7 +6,7 @@ use std::sync::Arc;
 use cdk_common::database::{
     KVStoreDatabase as CdkKVStoreDatabase, WalletDatabase as CdkWalletDatabase,
 };
-use cdk_common::wallet::{WalletOperation, WalletOperationState};
+use cdk_common::wallet::WalletSaga;
 use cdk_sql_common::pool::DatabasePool;
 use cdk_sql_common::SQLWalletDatabase;
 
@@ -190,29 +190,26 @@ pub trait WalletDatabase: Send + Sync {
     /// Remove Keys from storage
     async fn remove_keys(&self, id: Id) -> Result<(), FfiError>;
 
-    // ========== Operation management methods ==========
-    // WalletOperation is serialized as JSON for FFI compatibility
+    // ========== Saga management methods ==========
+    // WalletSaga is serialized as JSON for FFI compatibility
 
-    /// Add a wallet operation to storage (JSON serialized)
-    async fn add_operation(&self, operation_json: String) -> Result<(), FfiError>;
+    /// Add a wallet saga to storage (JSON serialized)
+    async fn add_saga(&self, saga_json: String) -> Result<(), FfiError>;
 
-    /// Get a wallet operation by ID (returns JSON serialized)
-    async fn get_operation(&self, id: String) -> Result<Option<String>, FfiError>;
+    /// Get a wallet saga by ID (returns JSON serialized)
+    async fn get_saga(&self, id: String) -> Result<Option<String>, FfiError>;
 
-    /// Update a wallet operation's state
-    async fn update_operation_state(&self, id: String, state: String) -> Result<(), FfiError>;
+    /// Update a wallet saga (JSON serialized) with optimistic locking.
+    ///
+    /// Returns `true` if the update succeeded (version matched),
+    /// `false` if another instance modified the saga first.
+    async fn update_saga(&self, saga_json: String) -> Result<bool, FfiError>;
 
-    /// Update a wallet operation (JSON serialized)
-    async fn update_operation(&self, operation_json: String) -> Result<(), FfiError>;
+    /// Delete a wallet saga
+    async fn delete_saga(&self, id: String) -> Result<(), FfiError>;
 
-    /// Delete a wallet operation
-    async fn delete_operation(&self, id: String) -> Result<(), FfiError>;
-
-    /// Get operations by state (returns JSON serialized operations)
-    async fn get_operations_by_state(&self, state: String) -> Result<Vec<String>, FfiError>;
-
-    /// Get all incomplete operations (returns JSON serialized operations)
-    async fn get_incomplete_operations(&self) -> Result<Vec<String>, FfiError>;
+    /// Get all incomplete sagas (returns JSON serialized sagas)
+    async fn get_incomplete_sagas(&self) -> Result<Vec<String>, FfiError>;
 
     // ========== Proof reservation methods ==========
 
@@ -772,77 +769,55 @@ impl CdkWalletDatabase<cdk::cdk_database::Error> for WalletDatabaseBridge {
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
     }
 
-    // Operation management methods (using JSON serialization)
-
-    async fn add_operation(
-        &self,
-        operation: WalletOperation,
-    ) -> Result<(), cdk::cdk_database::Error> {
-        let json = serde_json::to_string(&operation)
+    async fn add_saga(&self, saga: WalletSaga) -> Result<(), cdk::cdk_database::Error> {
+        let json = serde_json::to_string(&saga)
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
         self.ffi_db
-            .add_operation(json)
+            .add_saga(json)
             .await
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
     }
 
-    async fn get_operation(
+    async fn get_saga(
         &self,
-        id: &str,
-    ) -> Result<Option<WalletOperation>, cdk::cdk_database::Error> {
+        id: &uuid::Uuid,
+    ) -> Result<Option<WalletSaga>, cdk::cdk_database::Error> {
         let json_opt = self
             .ffi_db
-            .get_operation(id.to_string())
+            .get_saga(id.to_string())
             .await
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
 
         match json_opt {
             Some(json) => {
-                let op: WalletOperation = serde_json::from_str(&json)
+                let saga: WalletSaga = serde_json::from_str(&json)
                     .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
-                Ok(Some(op))
+                Ok(Some(saga))
             }
             None => Ok(None),
         }
     }
 
-    async fn update_operation_state(
-        &self,
-        id: &str,
-        state: WalletOperationState,
-    ) -> Result<(), cdk::cdk_database::Error> {
-        self.ffi_db
-            .update_operation_state(id.to_string(), state.to_string())
-            .await
-            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
-    }
-
-    async fn update_operation(
-        &self,
-        operation: WalletOperation,
-    ) -> Result<(), cdk::cdk_database::Error> {
-        let json = serde_json::to_string(&operation)
+    async fn update_saga(&self, saga: WalletSaga) -> Result<bool, cdk::cdk_database::Error> {
+        let json = serde_json::to_string(&saga)
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
         self.ffi_db
-            .update_operation(json)
+            .update_saga(json)
             .await
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
     }
 
-    async fn delete_operation(&self, id: &str) -> Result<(), cdk::cdk_database::Error> {
+    async fn delete_saga(&self, id: &uuid::Uuid) -> Result<(), cdk::cdk_database::Error> {
         self.ffi_db
-            .delete_operation(id.to_string())
+            .delete_saga(id.to_string())
             .await
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
     }
 
-    async fn get_operations_by_state(
-        &self,
-        state: WalletOperationState,
-    ) -> Result<Vec<WalletOperation>, cdk::cdk_database::Error> {
+    async fn get_incomplete_sagas(&self) -> Result<Vec<WalletSaga>, cdk::cdk_database::Error> {
         let json_vec = self
             .ffi_db
-            .get_operations_by_state(state.to_string())
+            .get_incomplete_sagas()
             .await
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
 
@@ -854,31 +829,11 @@ impl CdkWalletDatabase<cdk::cdk_database::Error> for WalletDatabaseBridge {
             })
             .collect()
     }
-
-    async fn get_incomplete_operations(
-        &self,
-    ) -> Result<Vec<WalletOperation>, cdk::cdk_database::Error> {
-        let json_vec = self
-            .ffi_db
-            .get_incomplete_operations()
-            .await
-            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
-
-        json_vec
-            .into_iter()
-            .map(|json| {
-                serde_json::from_str(&json)
-                    .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
-            })
-            .collect()
-    }
-
-    // Proof reservation methods
 
     async fn reserve_proofs(
         &self,
         ys: Vec<cdk::nuts::PublicKey>,
-        operation_id: &str,
+        operation_id: &uuid::Uuid,
     ) -> Result<(), cdk::cdk_database::Error> {
         let ffi_ys: Vec<PublicKey> = ys.into_iter().map(Into::into).collect();
         self.ffi_db
@@ -887,7 +842,10 @@ impl CdkWalletDatabase<cdk::cdk_database::Error> for WalletDatabaseBridge {
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
     }
 
-    async fn release_proofs(&self, operation_id: &str) -> Result<(), cdk::cdk_database::Error> {
+    async fn release_proofs(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk::cdk_database::Error> {
         self.ffi_db
             .release_proofs(operation_id.to_string())
             .await
@@ -896,7 +854,7 @@ impl CdkWalletDatabase<cdk::cdk_database::Error> for WalletDatabaseBridge {
 
     async fn get_reserved_proofs(
         &self,
-        operation_id: &str,
+        operation_id: &uuid::Uuid,
     ) -> Result<Vec<cdk::types::ProofInfo>, cdk::cdk_database::Error> {
         let result = self
             .ffi_db
@@ -932,8 +890,6 @@ impl CdkWalletDatabase<cdk::cdk_database::Error> for WalletDatabaseBridge {
             })
             .collect()
     }
-
-    // KV Store write methods
 
     async fn kv_write(
         &self,
@@ -1404,27 +1360,29 @@ where
             .map_err(|e| FfiError::Database { msg: e.to_string() })
     }
 
-    // ========== Operation management methods ==========
+    // ========== Saga management methods ==========
 
-    async fn add_operation(&self, operation_json: String) -> Result<(), FfiError> {
-        let operation: WalletOperation = serde_json::from_str(&operation_json)
+    async fn add_saga(&self, saga_json: String) -> Result<(), FfiError> {
+        let saga: WalletSaga = serde_json::from_str(&saga_json)
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         self.inner
-            .add_operation(operation)
+            .add_saga(saga)
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })
     }
 
-    async fn get_operation(&self, id: String) -> Result<Option<String>, FfiError> {
+    async fn get_saga(&self, id: String) -> Result<Option<String>, FfiError> {
+        let id =
+            uuid::Uuid::parse_str(&id).map_err(|e| FfiError::Database { msg: e.to_string() })?;
         let result = self
             .inner
-            .get_operation(&id)
+            .get_saga(&id)
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
 
         match result {
-            Some(op) => {
-                let json = serde_json::to_string(&op)
+            Some(saga) => {
+                let json = serde_json::to_string(&saga)
                     .map_err(|e| FfiError::Database { msg: e.to_string() })?;
                 Ok(Some(json))
             }
@@ -1432,61 +1390,35 @@ where
         }
     }
 
-    async fn update_operation_state(&self, id: String, state: String) -> Result<(), FfiError> {
-        let cdk_state: WalletOperationState = state.parse().map_err(|_| FfiError::Database {
-            msg: format!("Invalid operation state: {}", state),
-        })?;
-        self.inner
-            .update_operation_state(&id, cdk_state)
-            .await
-            .map_err(|e| FfiError::Database { msg: e.to_string() })
-    }
-
-    async fn update_operation(&self, operation_json: String) -> Result<(), FfiError> {
-        let operation: WalletOperation = serde_json::from_str(&operation_json)
+    async fn update_saga(&self, saga_json: String) -> Result<bool, FfiError> {
+        let saga: WalletSaga = serde_json::from_str(&saga_json)
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         self.inner
-            .update_operation(operation)
+            .update_saga(saga)
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })
     }
 
-    async fn delete_operation(&self, id: String) -> Result<(), FfiError> {
+    async fn delete_saga(&self, id: String) -> Result<(), FfiError> {
+        let id =
+            uuid::Uuid::parse_str(&id).map_err(|e| FfiError::Database { msg: e.to_string() })?;
         self.inner
-            .delete_operation(&id)
+            .delete_saga(&id)
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })
     }
 
-    async fn get_operations_by_state(&self, state: String) -> Result<Vec<String>, FfiError> {
-        let cdk_state: WalletOperationState = state.parse().map_err(|_| FfiError::Database {
-            msg: format!("Invalid operation state: {}", state),
-        })?;
+    async fn get_incomplete_sagas(&self) -> Result<Vec<String>, FfiError> {
         let result = self
             .inner
-            .get_operations_by_state(cdk_state)
+            .get_incomplete_sagas()
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
 
         result
             .into_iter()
-            .map(|op| {
-                serde_json::to_string(&op).map_err(|e| FfiError::Database { msg: e.to_string() })
-            })
-            .collect()
-    }
-
-    async fn get_incomplete_operations(&self) -> Result<Vec<String>, FfiError> {
-        let result = self
-            .inner
-            .get_incomplete_operations()
-            .await
-            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
-
-        result
-            .into_iter()
-            .map(|op| {
-                serde_json::to_string(&op).map_err(|e| FfiError::Database { msg: e.to_string() })
+            .map(|saga| {
+                serde_json::to_string(&saga).map_err(|e| FfiError::Database { msg: e.to_string() })
             })
             .collect()
     }
@@ -1498,6 +1430,8 @@ where
         ys: Vec<PublicKey>,
         operation_id: String,
     ) -> Result<(), FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         let cdk_ys: Result<Vec<cdk::nuts::PublicKey>, FfiError> =
             ys.into_iter().map(|pk| pk.try_into()).collect();
         let cdk_ys = cdk_ys?;
@@ -1508,6 +1442,8 @@ where
     }
 
     async fn release_proofs(&self, operation_id: String) -> Result<(), FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         self.inner
             .release_proofs(&operation_id)
             .await
@@ -1515,6 +1451,8 @@ where
     }
 
     async fn get_reserved_proofs(&self, operation_id: String) -> Result<Vec<ProofInfo>, FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         let result = self
             .inner
             .get_reserved_proofs(&operation_id)

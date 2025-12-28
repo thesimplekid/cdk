@@ -1,23 +1,24 @@
--- Migration to add wallet operations table and proof operation tracking
+-- Migration to add wallet sagas table and proof operation tracking
 
--- Create wallet_operations table
-CREATE TABLE IF NOT EXISTS wallet_operations (
+-- Create wallet_sagas table with version for optimistic locking
+CREATE TABLE IF NOT EXISTS wallet_sagas (
     id TEXT PRIMARY KEY,
     kind TEXT CHECK (kind IN ('send', 'receive', 'swap', 'mint', 'melt')) NOT NULL,
-    state TEXT CHECK (state IN ('init', 'prepared', 'executing', 'pending', 'finalized', 'rolled_back')) NOT NULL,
+    state TEXT NOT NULL,
     amount INTEGER NOT NULL,
     mint_url TEXT NOT NULL,
     unit TEXT NOT NULL,
+    quote_id TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    data TEXT NOT NULL
+    data TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0
 );
 
 -- Create indexes for efficient queries
-CREATE INDEX IF NOT EXISTS wallet_operations_state_index ON wallet_operations(state);
-CREATE INDEX IF NOT EXISTS wallet_operations_mint_url_index ON wallet_operations(mint_url);
-CREATE INDEX IF NOT EXISTS wallet_operations_kind_index ON wallet_operations(kind);
-CREATE INDEX IF NOT EXISTS wallet_operations_created_at_index ON wallet_operations(created_at);
+CREATE INDEX IF NOT EXISTS wallet_sagas_mint_url_index ON wallet_sagas(mint_url);
+CREATE INDEX IF NOT EXISTS wallet_sagas_kind_index ON wallet_sagas(kind);
+CREATE INDEX IF NOT EXISTS wallet_sagas_created_at_index ON wallet_sagas(created_at);
 
 -- Add operation tracking columns to proof table
 ALTER TABLE proof ADD COLUMN used_by_operation TEXT;

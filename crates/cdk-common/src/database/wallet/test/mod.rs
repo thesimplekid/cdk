@@ -826,11 +826,6 @@ where
     assert!(retrieved.is_none());
 }
 
-// =============================================================================
-// Note: Transaction rollback tests have been removed since the saga pattern
-// replaces the transaction-based approach. Recovery is now handled by the saga
-// compensation mechanism instead of database transaction rollbacks.
-
 /// Unit test that is expected to be passed for a correct wallet database implementation
 #[macro_export]
 macro_rules! wallet_db_test {

@@ -281,34 +281,26 @@ impl WalletDatabase for WalletSqliteDatabase {
         self.inner.remove_keys(id).await
     }
 
-    // ========== Operation management methods ==========
+    // ========== Saga management methods ==========
 
-    async fn add_operation(&self, operation_json: String) -> Result<(), FfiError> {
-        self.inner.add_operation(operation_json).await
+    async fn add_saga(&self, saga_json: String) -> Result<(), FfiError> {
+        self.inner.add_saga(saga_json).await
     }
 
-    async fn get_operation(&self, id: String) -> Result<Option<String>, FfiError> {
-        self.inner.get_operation(id).await
+    async fn get_saga(&self, id: String) -> Result<Option<String>, FfiError> {
+        self.inner.get_saga(id).await
     }
 
-    async fn update_operation_state(&self, id: String, state: String) -> Result<(), FfiError> {
-        self.inner.update_operation_state(id, state).await
+    async fn update_saga(&self, saga_json: String) -> Result<bool, FfiError> {
+        self.inner.update_saga(saga_json).await
     }
 
-    async fn update_operation(&self, operation_json: String) -> Result<(), FfiError> {
-        self.inner.update_operation(operation_json).await
+    async fn delete_saga(&self, id: String) -> Result<(), FfiError> {
+        self.inner.delete_saga(id).await
     }
 
-    async fn delete_operation(&self, id: String) -> Result<(), FfiError> {
-        self.inner.delete_operation(id).await
-    }
-
-    async fn get_operations_by_state(&self, state: String) -> Result<Vec<String>, FfiError> {
-        self.inner.get_operations_by_state(state).await
-    }
-
-    async fn get_incomplete_operations(&self) -> Result<Vec<String>, FfiError> {
-        self.inner.get_incomplete_operations().await
+    async fn get_incomplete_sagas(&self) -> Result<Vec<String>, FfiError> {
+        self.inner.get_incomplete_sagas().await
     }
 
     // ========== Proof reservation methods ==========

@@ -21,9 +21,7 @@ use tracing::instrument;
 
 use super::error::Error;
 use crate::migrations::migrate_00_to_01;
-use crate::wallet::migrations::{
-    migrate_01_to_02, migrate_02_to_03, migrate_03_to_04, migrate_04_to_05,
-};
+use crate::wallet::migrations::{migrate_01_to_02, migrate_02_to_03, migrate_03_to_04};
 
 mod migrations;
 
@@ -45,14 +43,14 @@ const CONFIG_TABLE: TableDefinition<&str, &str> = TableDefinition::new("config")
 const KEYSET_COUNTER: TableDefinition<&str, u32> = TableDefinition::new("keyset_counter");
 // <Transaction_id, Transaction>
 const TRANSACTIONS_TABLE: TableDefinition<&[u8], &str> = TableDefinition::new("transactions");
-// <Operation_id, WalletOperation>
-const OPERATIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("wallet_operations");
+// <Saga_id, WalletSaga>
+const SAGAS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("wallet_sagas");
 
 const KEYSET_U32_MAPPING: TableDefinition<u32, &str> = TableDefinition::new("keyset_u32_mapping");
 // <(primary_namespace, secondary_namespace, key), value>
 const KV_STORE_TABLE: TableDefinition<(&str, &str, &str), &[u8]> = TableDefinition::new("kv_store");
 
-const DATABASE_VERSION: u32 = 5;
+const DATABASE_VERSION: u32 = 4;
 
 /// Wallet Redb Database
 #[derive(Debug, Clone)]
@@ -114,10 +112,6 @@ impl WalletRedbDatabase {
 
                             if current_file_version == 3 {
                                 current_file_version = migrate_03_to_04(Arc::clone(&db))?;
-                            }
-
-                            if current_file_version == 4 {
-                                current_file_version = migrate_04_to_05(Arc::clone(&db))?;
                             }
 
                             if current_file_version != DATABASE_VERSION {
@@ -951,22 +945,16 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
         Ok(())
     }
 
-    // Operation management methods
-
     #[instrument(skip(self))]
-    async fn add_operation(
-        &self,
-        operation: wallet::WalletOperation,
-    ) -> Result<(), database::Error> {
-        let operation_json = serde_json::to_string(&operation).map_err(Error::from)?;
+    async fn add_saga(&self, saga: wallet::WalletSaga) -> Result<(), database::Error> {
+        let saga_json = serde_json::to_string(&saga).map_err(Error::from)?;
+        let id_str = saga.id.to_string();
 
         let write_txn = self.db.begin_write().map_err(Error::from)?;
         {
-            let mut table = write_txn
-                .open_table(OPERATIONS_TABLE)
-                .map_err(Error::from)?;
+            let mut table = write_txn.open_table(SAGAS_TABLE).map_err(Error::from)?;
             table
-                .insert(operation.id.as_str(), operation_json.as_str())
+                .insert(id_str.as_str(), saga_json.as_str())
                 .map_err(Error::from)?;
         }
         write_txn.commit().map_err(Error::from)?;
@@ -974,143 +962,109 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
     }
 
     #[instrument(skip(self))]
-    async fn get_operation(
+    async fn get_saga(
         &self,
-        id: &str,
-    ) -> Result<Option<wallet::WalletOperation>, database::Error> {
+        id: &uuid::Uuid,
+    ) -> Result<Option<wallet::WalletSaga>, database::Error> {
         let read_txn = self.db.begin_read().map_err(Error::from)?;
-        let table = read_txn.open_table(OPERATIONS_TABLE).map_err(Error::from)?;
+        let table = read_txn.open_table(SAGAS_TABLE).map_err(Error::from)?;
+        let id_str = id.to_string();
 
         let result = table
-            .get(id)
+            .get(id_str.as_str())
             .map_err(Error::from)?
-            .map(|op| serde_json::from_str(op.value()).map_err(Error::from))
+            .map(|saga| serde_json::from_str(saga.value()).map_err(Error::from))
             .transpose()?;
 
         Ok(result)
     }
 
     #[instrument(skip(self))]
-    async fn update_operation_state(
-        &self,
-        id: &str,
-        state: wallet::WalletOperationState,
-    ) -> Result<(), database::Error> {
-        let write_txn = self.db.begin_write().map_err(Error::from)?;
+    async fn update_saga(&self, saga: wallet::WalletSaga) -> Result<bool, database::Error> {
+        let id_str = saga.id.to_string();
 
-        let mut operation: wallet::WalletOperation = {
-            let table = write_txn
-                .open_table(OPERATIONS_TABLE)
-                .map_err(Error::from)?;
-            let op_json = table
-                .get(id)
+        // The saga.version has already been incremented by the caller, so we check
+        // for (saga.version - 1) as the expected version in the database.
+        let expected_version = saga.version.saturating_sub(1);
+
+        let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let updated = {
+            let mut table = write_txn.open_table(SAGAS_TABLE).map_err(Error::from)?;
+
+            // Read existing saga to check version (optimistic locking)
+            let existing_saga_json = table
+                .get(id_str.as_str())
                 .map_err(Error::from)?
-                .ok_or_else(|| Error::CDK(cdk_common::error::Error::OperationNotFound))?;
-            serde_json::from_str(op_json.value()).map_err(Error::from)?
+                .map(|v| v.value().to_string());
+
+            match existing_saga_json {
+                Some(json) => {
+                    let existing_saga: wallet::WalletSaga =
+                        serde_json::from_str(&json).map_err(Error::from)?;
+
+                    // Check if version matches expected version
+                    if existing_saga.version != expected_version {
+                        // Version mismatch - another instance modified it
+                        false
+                    } else {
+                        // Version matches - safe to update
+                        let saga_json = serde_json::to_string(&saga).map_err(Error::from)?;
+                        table
+                            .insert(id_str.as_str(), saga_json.as_str())
+                            .map_err(Error::from)?;
+                        true
+                    }
+                }
+                None => {
+                    // Saga doesn't exist - can't update
+                    false
+                }
+            }
         };
-
-        operation.update_state(state);
-        let operation_json = serde_json::to_string(&operation).map_err(Error::from)?;
-
-        {
-            let mut table = write_txn
-                .open_table(OPERATIONS_TABLE)
-                .map_err(Error::from)?;
-            table
-                .insert(id, operation_json.as_str())
-                .map_err(Error::from)?;
-        }
-
         write_txn.commit().map_err(Error::from)?;
-        Ok(())
+        Ok(updated)
     }
 
     #[instrument(skip(self))]
-    async fn update_operation(
-        &self,
-        operation: wallet::WalletOperation,
-    ) -> Result<(), database::Error> {
-        let operation_json = serde_json::to_string(&operation).map_err(Error::from)?;
-
+    async fn delete_saga(&self, id: &uuid::Uuid) -> Result<(), database::Error> {
         let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let id_str = id.to_string();
         {
-            let mut table = write_txn
-                .open_table(OPERATIONS_TABLE)
-                .map_err(Error::from)?;
-            table
-                .insert(operation.id.as_str(), operation_json.as_str())
-                .map_err(Error::from)?;
+            let mut table = write_txn.open_table(SAGAS_TABLE).map_err(Error::from)?;
+            table.remove(id_str.as_str()).map_err(Error::from)?;
         }
         write_txn.commit().map_err(Error::from)?;
         Ok(())
     }
 
     #[instrument(skip(self))]
-    async fn delete_operation(&self, id: &str) -> Result<(), database::Error> {
-        let write_txn = self.db.begin_write().map_err(Error::from)?;
-        {
-            let mut table = write_txn
-                .open_table(OPERATIONS_TABLE)
-                .map_err(Error::from)?;
-            table.remove(id).map_err(Error::from)?;
-        }
-        write_txn.commit().map_err(Error::from)?;
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    async fn get_operations_by_state(
-        &self,
-        state: wallet::WalletOperationState,
-    ) -> Result<Vec<wallet::WalletOperation>, database::Error> {
+    async fn get_incomplete_sagas(&self) -> Result<Vec<wallet::WalletSaga>, database::Error> {
         let read_txn = self.db.begin_read().map_err(Error::from)?;
-        let table = read_txn.open_table(OPERATIONS_TABLE).map_err(Error::from)?;
+        let table = read_txn.open_table(SAGAS_TABLE).map_err(Error::from)?;
 
-        let operations: Vec<wallet::WalletOperation> = table
+        let mut sagas: Vec<wallet::WalletSaga> = table
             .iter()
             .map_err(Error::from)?
             .flatten()
-            .filter_map(|(_, op_json)| {
-                serde_json::from_str::<wallet::WalletOperation>(op_json.value()).ok()
+            .filter_map(|(_, saga_json)| {
+                serde_json::from_str::<wallet::WalletSaga>(saga_json.value()).ok()
             })
-            .filter(|op| op.state == state)
-            .collect();
-
-        Ok(operations)
-    }
-
-    #[instrument(skip(self))]
-    async fn get_incomplete_operations(
-        &self,
-    ) -> Result<Vec<wallet::WalletOperation>, database::Error> {
-        let read_txn = self.db.begin_read().map_err(Error::from)?;
-        let table = read_txn.open_table(OPERATIONS_TABLE).map_err(Error::from)?;
-
-        let mut operations: Vec<wallet::WalletOperation> = table
-            .iter()
-            .map_err(Error::from)?
-            .flatten()
-            .filter_map(|(_, op_json)| {
-                serde_json::from_str::<wallet::WalletOperation>(op_json.value()).ok()
-            })
-            .filter(|op| !op.is_complete())
             .collect();
 
         // Sort by created_at ascending (oldest first)
-        operations.sort_by_key(|op| op.created_at);
+        sagas.sort_by_key(|saga| saga.created_at);
 
-        Ok(operations)
+        Ok(sagas)
     }
-
-    // Proof reservation methods
 
     #[instrument(skip(self))]
     async fn reserve_proofs(
         &self,
         ys: Vec<PublicKey>,
-        operation_id: &str,
+        operation_id: &uuid::Uuid,
     ) -> Result<(), database::Error> {
         let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
 
         {
             let mut table = write_txn.open_table(PROOFS_TABLE).map_err(Error::from)?;
@@ -1131,7 +1085,7 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
                     // Only reserve if unspent
                     if proof.state == State::Unspent {
                         proof.state = State::Reserved;
-                        proof.used_by_operation = Some(operation_id.to_string());
+                        proof.used_by_operation = Some(operation_id_str.clone());
 
                         let updated_json = serde_json::to_string(&proof).map_err(Error::from)?;
                         table
@@ -1147,8 +1101,9 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
     }
 
     #[instrument(skip(self))]
-    async fn release_proofs(&self, operation_id: &str) -> Result<(), database::Error> {
+    async fn release_proofs(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
         let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
 
         {
             let mut table = write_txn.open_table(PROOFS_TABLE).map_err(Error::from)?;
@@ -1166,7 +1121,7 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
 
             // Now update proofs that match the operation_id
             for (y_bytes, mut proof) in all_proofs {
-                if proof.used_by_operation.as_deref() == Some(operation_id) {
+                if proof.used_by_operation.as_deref() == Some(&operation_id_str) {
                     proof.state = State::Unspent;
                     proof.used_by_operation = None;
 
@@ -1185,10 +1140,11 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
     #[instrument(skip(self))]
     async fn get_reserved_proofs(
         &self,
-        operation_id: &str,
+        operation_id: &uuid::Uuid,
     ) -> Result<Vec<ProofInfo>, database::Error> {
         let read_txn = self.db.begin_read().map_err(Error::from)?;
         let table = read_txn.open_table(PROOFS_TABLE).map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
 
         let proofs: Vec<ProofInfo> = table
             .iter()
@@ -1197,13 +1153,11 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
             .filter_map(|(_, proof_json)| {
                 serde_json::from_str::<ProofInfo>(proof_json.value()).ok()
             })
-            .filter(|proof| proof.used_by_operation.as_deref() == Some(operation_id))
+            .filter(|proof| proof.used_by_operation.as_deref() == Some(&operation_id_str))
             .collect();
 
         Ok(proofs)
     }
-
-    // KV Store write methods (non-transactional)
 
     #[instrument(skip(self, value))]
     async fn kv_write(
