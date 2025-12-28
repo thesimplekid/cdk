@@ -163,11 +163,9 @@ where
     let mint_info = MintInfo::default();
 
     // Add mint
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(mint_url.clone(), Some(mint_info.clone()))
+    db.add_mint(mint_url.clone(), Some(mint_info.clone()))
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get mint
     let retrieved = db.get_mint(mint_url.clone()).await.unwrap();
@@ -185,9 +183,7 @@ where
 {
     let mint_url = test_mint_url();
 
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(mint_url.clone(), None).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_mint(mint_url.clone(), None).await.unwrap();
 
     // Verify mint exists in the database
     let mints = db.get_mints().await.unwrap();
@@ -202,14 +198,10 @@ where
     let mint_url = test_mint_url();
 
     // Add mint
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(mint_url.clone(), None).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_mint(mint_url.clone(), None).await.unwrap();
 
     // Remove mint
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.remove_mint(mint_url.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.remove_mint(mint_url.clone()).await.unwrap();
 
     let result = db.get_mint(mint_url).await.unwrap();
     assert!(result.is_none());
@@ -224,16 +216,12 @@ where
     let new_url = test_mint_url_2();
 
     // Add mint with old URL
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(old_url.clone(), None).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_mint(old_url.clone(), None).await.unwrap();
 
     // Update URL
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_mint_url(old_url.clone(), new_url.clone())
+    db.update_mint_url(old_url.clone(), new_url.clone())
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 }
 
 // =============================================================================
@@ -250,12 +238,10 @@ where
     let keyset_info = test_keyset_info(keyset_id, &mint_url);
 
     // Add mint first
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(mint_url.clone(), None).await.unwrap();
-    tx.add_mint_keysets(mint_url.clone(), vec![keyset_info.clone()])
+    db.add_mint(mint_url.clone(), None).await.unwrap();
+    db.add_mint_keysets(mint_url.clone(), vec![keyset_info.clone()])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get keyset by ID
     let retrieved = db.get_keyset_by_id(&keyset_id).await.unwrap();
@@ -278,18 +264,14 @@ where
     let keyset_info = test_keyset_info(keyset_id, &mint_url);
 
     // Add keyset
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(mint_url.clone(), None).await.unwrap();
-    tx.add_mint_keysets(mint_url.clone(), vec![keyset_info])
+    db.add_mint(mint_url.clone(), None).await.unwrap();
+    db.add_mint_keysets(mint_url.clone(), vec![keyset_info])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get in transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let retrieved = tx.get_keyset_by_id(&keyset_id).await.unwrap();
+    let retrieved = db.get_keyset_by_id(&keyset_id).await.unwrap();
     assert!(retrieved.is_some());
-    tx.rollback().await.unwrap();
 }
 
 /// Test adding and retrieving keys
@@ -307,9 +289,7 @@ where
     };
 
     // Add keys
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_keys(keyset).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_keys(keyset).await.unwrap();
 
     // Get keys
     let retrieved = db.get_keys(&keyset_id).await.unwrap();
@@ -333,17 +313,13 @@ where
     };
 
     // Add keys
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_keys(keyset).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_keys(keyset).await.unwrap();
 
     // Get in transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let retrieved = tx.get_keys(&keyset_id).await.unwrap();
+    let retrieved = db.get_keys(&keyset_id).await.unwrap();
     assert!(retrieved.is_some());
     let retrieved_keys = retrieved.unwrap();
     assert_eq!(retrieved_keys.len(), keys.len());
-    tx.rollback().await.unwrap();
 }
 
 /// Test removing keys
@@ -361,18 +337,14 @@ where
     };
 
     // Add keys
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_keys(keyset).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_keys(keyset).await.unwrap();
 
     // Verify keys were added
     let retrieved = db.get_keys(&keyset_id).await.unwrap();
     assert!(retrieved.is_some());
 
     // Remove keys
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.remove_keys(&keyset_id).await.unwrap();
-    tx.commit().await.unwrap();
+    db.remove_keys(&keyset_id).await.unwrap();
 
     let retrieved = db.get_keys(&keyset_id).await.unwrap();
     assert!(retrieved.is_none());
@@ -391,9 +363,7 @@ where
     let quote = test_mint_quote(mint_url);
 
     // Add quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint_quote(quote.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_mint_quote(quote.clone()).await.unwrap();
 
     // Get quote
     let retrieved = db.get_mint_quote(&quote.id).await.unwrap();
@@ -414,15 +384,11 @@ where
     let quote = test_mint_quote(mint_url);
 
     // Add quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint_quote(quote.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_mint_quote(quote.clone()).await.unwrap();
 
     // Get in transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let retrieved = tx.get_mint_quote(&quote.id).await.unwrap();
+    let retrieved = db.get_mint_quote(&quote.id).await.unwrap();
     assert!(retrieved.is_some());
-    tx.rollback().await.unwrap();
 }
 
 /// Test removing mint quote
@@ -434,14 +400,10 @@ where
     let quote = test_mint_quote(mint_url);
 
     // Add quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint_quote(quote.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_mint_quote(quote.clone()).await.unwrap();
 
     // Remove quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.remove_mint_quote(&quote.id).await.unwrap();
-    tx.commit().await.unwrap();
+    db.remove_mint_quote(&quote.id).await.unwrap();
 
     let retrieved = db.get_mint_quote(&quote.id).await.unwrap();
     assert!(retrieved.is_none());
@@ -459,9 +421,7 @@ where
     let quote = test_melt_quote();
 
     // Add quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_melt_quote(quote.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_melt_quote(quote.clone()).await.unwrap();
 
     // Get quote
     let retrieved = db.get_melt_quote(&quote.id).await.unwrap();
@@ -481,15 +441,11 @@ where
     let quote = test_melt_quote();
 
     // Add quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_melt_quote(quote.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_melt_quote(quote.clone()).await.unwrap();
 
     // Get in transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let retrieved = tx.get_melt_quote(&quote.id).await.unwrap();
+    let retrieved = db.get_melt_quote(&quote.id).await.unwrap();
     assert!(retrieved.is_some());
-    tx.rollback().await.unwrap();
 }
 
 /// Test removing melt quote
@@ -500,14 +456,10 @@ where
     let quote = test_melt_quote();
 
     // Add quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_melt_quote(quote.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_melt_quote(quote.clone()).await.unwrap();
 
     // Remove quote
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.remove_melt_quote(&quote.id).await.unwrap();
-    tx.commit().await.unwrap();
+    db.remove_melt_quote(&quote.id).await.unwrap();
 
     let retrieved = db.get_melt_quote(&quote.id).await.unwrap();
     assert!(retrieved.is_none());
@@ -527,11 +479,9 @@ where
     let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
 
     // Add proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info.clone()], vec![])
+    db.update_proofs(vec![proof_info.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get proofs
     let proofs = db.get_proofs(None, None, None, None).await.unwrap();
@@ -560,17 +510,13 @@ where
     let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
 
     // Add proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info.clone()], vec![])
+    db.update_proofs(vec![proof_info.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get proofs in transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let proofs = tx.get_proofs(None, None, None, None).await.unwrap();
+    let proofs = db.get_proofs(None, None, None, None).await.unwrap();
     assert!(!proofs.is_empty());
-    tx.rollback().await.unwrap();
 }
 
 /// Test updating proofs (add and remove)
@@ -584,18 +530,14 @@ where
     let proof_info_2 = test_proof_info(keyset_id, 200, mint_url.clone());
 
     // Add first proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info_1.clone()], vec![])
+    db.update_proofs(vec![proof_info_1.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Add second, remove first
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info_2.clone()], vec![proof_info_1.y])
+    db.update_proofs(vec![proof_info_2.clone()], vec![proof_info_1.y])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Verify
     let proofs = db.get_proofs(None, None, None, None).await.unwrap();
@@ -613,18 +555,14 @@ where
     let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
 
     // Add proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info.clone()], vec![])
+    db.update_proofs(vec![proof_info.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Update state
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs_state(vec![proof_info.y], State::Pending)
+    db.update_proofs_state(vec![proof_info.y], State::Pending)
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Verify
     let proofs = db
@@ -644,11 +582,9 @@ where
     let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
 
     // Add proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info.clone()], vec![])
+    db.update_proofs(vec![proof_info.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Filter by unit
     let proofs = db
@@ -675,11 +611,9 @@ where
     let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
 
     // Add proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info.clone()], vec![])
+    db.update_proofs(vec![proof_info.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Filter by state
     let proofs = db
@@ -711,11 +645,9 @@ where
     let proof_info_2 = test_proof_info(keyset_id, 200, mint_url.clone());
 
     // Add proofs
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info_1, proof_info_2], vec![])
+    db.update_proofs(vec![proof_info_1, proof_info_2], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get total balance
     let balance = db.get_balance(None, None, None).await.unwrap();
@@ -736,11 +668,9 @@ where
     let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
 
     // Add proof
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info.clone()], vec![])
+    db.update_proofs(vec![proof_info.clone()], vec![])
         .await
         .unwrap();
-    tx.commit().await.unwrap();
 
     // Get balance by state
     let balance = db
@@ -769,16 +699,12 @@ where
     let keyset_id = test_keyset_id();
 
     // Increment counter
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let counter1 = tx.increment_keyset_counter(&keyset_id, 5).await.unwrap();
-    tx.commit().await.unwrap();
+    let counter1 = db.increment_keyset_counter(&keyset_id, 5).await.unwrap();
 
     assert_eq!(counter1, 5);
 
     // Increment again
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let counter2 = tx.increment_keyset_counter(&keyset_id, 10).await.unwrap();
-    tx.commit().await.unwrap();
+    let counter2 = db.increment_keyset_counter(&keyset_id, 10).await.unwrap();
 
     assert_eq!(counter2, 15);
 }
@@ -792,22 +718,16 @@ where
     let keyset_id_2 = test_keyset_id_2();
 
     // Increment first keyset
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.increment_keyset_counter(&keyset_id_1, 5).await.unwrap();
-    tx.commit().await.unwrap();
+    db.increment_keyset_counter(&keyset_id_1, 5).await.unwrap();
 
     // Increment second keyset
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let counter2 = tx.increment_keyset_counter(&keyset_id_2, 10).await.unwrap();
-    tx.commit().await.unwrap();
+    let counter2 = db.increment_keyset_counter(&keyset_id_2, 10).await.unwrap();
 
     // Second keyset should start from 0
     assert_eq!(counter2, 10);
 
     // First keyset should still be at 5
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    let counter1 = tx.increment_keyset_counter(&keyset_id_1, 0).await.unwrap();
-    tx.rollback().await.unwrap();
+    let counter1 = db.increment_keyset_counter(&keyset_id_1, 0).await.unwrap();
 
     assert_eq!(counter1, 5);
 }
@@ -826,9 +746,7 @@ where
     let tx_id = transaction.id();
 
     // Add transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_transaction(transaction.clone()).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_transaction(transaction.clone()).await.unwrap();
 
     // Get transaction
     let retrieved = db.get_transaction(tx_id).await.unwrap();
@@ -846,10 +764,8 @@ where
     let tx_outgoing = test_transaction(mint_url.clone(), TransactionDirection::Outgoing);
 
     // Add transactions
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_transaction(tx_incoming).await.unwrap();
-    tx.add_transaction(tx_outgoing).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_transaction(tx_incoming).await.unwrap();
+    db.add_transaction(tx_outgoing).await.unwrap();
 
     // List all
     let transactions = db.list_transactions(None, None, None).await.unwrap();
@@ -880,10 +796,8 @@ where
     let tx_2 = test_transaction(mint_url_2.clone(), TransactionDirection::Incoming);
 
     // Add transactions
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_transaction(tx_1).await.unwrap();
-    tx.add_transaction(tx_2).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_transaction(tx_1).await.unwrap();
+    db.add_transaction(tx_2).await.unwrap();
 
     // Filter by mint
     let transactions = db
@@ -903,58 +817,19 @@ where
     let tx_id = transaction.id();
 
     // Add transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_transaction(transaction).await.unwrap();
-    tx.commit().await.unwrap();
+    db.add_transaction(transaction).await.unwrap();
 
     // Remove transaction
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.remove_transaction(tx_id).await.unwrap();
-    tx.commit().await.unwrap();
+    db.remove_transaction(tx_id).await.unwrap();
 
     let retrieved = db.get_transaction(tx_id).await.unwrap();
     assert!(retrieved.is_none());
 }
 
 // =============================================================================
-// Transaction Rollback Tests
-// =============================================================================
-
-/// Test transaction rollback
-pub async fn transaction_rollback<DB>(db: DB)
-where
-    DB: Database<crate::database::Error>,
-{
-    let mint_url = test_mint_url();
-
-    // Add mint but rollback
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.add_mint(mint_url.clone(), None).await.unwrap();
-    tx.rollback().await.unwrap();
-
-    // Verify mint was not added
-    let result = db.get_mint(mint_url).await.unwrap();
-    assert!(result.is_none());
-}
-
-/// Test proof rollback
-pub async fn proof_rollback<DB>(db: DB)
-where
-    DB: Database<crate::database::Error>,
-{
-    let mint_url = test_mint_url();
-    let keyset_id = test_keyset_id();
-    let proof_info = test_proof_info(keyset_id, 100, mint_url);
-
-    // Add proof but rollback
-    let mut tx = db.begin_db_transaction().await.unwrap();
-    tx.update_proofs(vec![proof_info], vec![]).await.unwrap();
-    tx.rollback().await.unwrap();
-
-    // Verify proof was not added
-    let proofs = db.get_proofs(None, None, None, None).await.unwrap();
-    assert!(proofs.is_empty());
-}
+// Note: Transaction rollback tests have been removed since the saga pattern
+// replaces the transaction-based approach. Recovery is now handled by the saga
+// compensation mechanism instead of database transaction rollbacks.
 
 /// Unit test that is expected to be passed for a correct wallet database implementation
 #[macro_export]
@@ -990,9 +865,7 @@ macro_rules! wallet_db_test {
             add_and_get_transaction,
             list_transactions,
             filter_transactions_by_mint,
-            remove_transaction,
-            transaction_rollback,
-            proof_rollback
+            remove_transaction
         );
     };
     ($make_db_fn:ident, $($name:ident),+ $(,)?) => {
