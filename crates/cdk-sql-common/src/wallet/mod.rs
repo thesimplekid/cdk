@@ -1345,7 +1345,7 @@ where
         let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
 
         for y in ys {
-            query(
+            let rows_affected = query(
                 r#"
                 UPDATE proof
                 SET state = 'RESERVED', used_by_operation = :operation_id
@@ -1356,6 +1356,10 @@ where
             .bind("operation_id", operation_id.to_string())
             .execute(&*conn)
             .await?;
+
+            if rows_affected == 0 {
+                return Err(database::Error::ProofNotUnspent);
+            }
         }
 
         Ok(())

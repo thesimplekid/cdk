@@ -253,6 +253,9 @@ pub enum Error {
     /// Proof not found
     #[error("Proof not found")]
     ProofNotFound,
+    /// Proof not in unspent state (may be reserved, pending, or spent)
+    #[error("Proof not in unspent state")]
+    ProofNotUnspent,
     /// Invalid keyset
     #[error("Unknown or invalid keyset")]
     InvalidKeysetId,

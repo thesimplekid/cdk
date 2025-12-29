@@ -1078,21 +1078,24 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
                     proof_json_opt.map(|proof_json| proof_json.value().to_string())
                 };
 
-                if let Some(proof_json_str) = proof_json_str {
-                    let mut proof: ProofInfo =
-                        serde_json::from_str(&proof_json_str).map_err(Error::from)?;
+                let Some(proof_json_str) = proof_json_str else {
+                    return Err(database::Error::ProofNotUnspent);
+                };
 
-                    // Only reserve if unspent
-                    if proof.state == State::Unspent {
-                        proof.state = State::Reserved;
-                        proof.used_by_operation = Some(operation_id_str.clone());
+                let mut proof: ProofInfo =
+                    serde_json::from_str(&proof_json_str).map_err(Error::from)?;
 
-                        let updated_json = serde_json::to_string(&proof).map_err(Error::from)?;
-                        table
-                            .insert(y_bytes.as_slice(), updated_json.as_str())
-                            .map_err(Error::from)?;
-                    }
+                if proof.state != State::Unspent {
+                    return Err(database::Error::ProofNotUnspent);
                 }
+
+                proof.state = State::Reserved;
+                proof.used_by_operation = Some(operation_id_str.clone());
+
+                let updated_json = serde_json::to_string(&proof).map_err(Error::from)?;
+                table
+                    .insert(y_bytes.as_slice(), updated_json.as_str())
+                    .map_err(Error::from)?;
             }
         }
 

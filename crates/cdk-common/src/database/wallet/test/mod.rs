@@ -1371,7 +1371,8 @@ macro_rules! wallet_db_test {
             get_incomplete_sagas,
             reserve_proofs,
             release_proofs,
-            get_reserved_proofs
+            get_reserved_proofs,
+            reserve_proofs_already_reserved
         );
     };
     ($make_db_fn:ident, $($name:ident),+ $(,)?) => {
