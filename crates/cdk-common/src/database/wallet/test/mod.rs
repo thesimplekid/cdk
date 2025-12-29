@@ -826,10 +826,192 @@ where
     assert!(retrieved.is_none());
 }
 
+// KV Store Tests
 // =============================================================================
-// Note: Transaction rollback tests have been removed since the saga pattern
-// replaces the transaction-based approach. Recovery is now handled by the saga
-// compensation mechanism instead of database transaction rollbacks.
+
+/// Test KV store write and read operations
+pub async fn kvstore_write_and_read<DB>(db: DB)
+where
+    DB: Database<crate::database::Error>,
+{
+    // Write some test data
+    db.kv_write("test_namespace", "sub_namespace", "key1", b"value1")
+        .await
+        .unwrap();
+    db.kv_write("test_namespace", "sub_namespace", "key2", b"value2")
+        .await
+        .unwrap();
+    db.kv_write("test_namespace", "other_sub", "key3", b"value3")
+        .await
+        .unwrap();
+
+    // Read back the data
+    let value1 = db
+        .kv_read("test_namespace", "sub_namespace", "key1")
+        .await
+        .unwrap();
+    assert_eq!(value1, Some(b"value1".to_vec()));
+
+    let value2 = db
+        .kv_read("test_namespace", "sub_namespace", "key2")
+        .await
+        .unwrap();
+    assert_eq!(value2, Some(b"value2".to_vec()));
+
+    let value3 = db
+        .kv_read("test_namespace", "other_sub", "key3")
+        .await
+        .unwrap();
+    assert_eq!(value3, Some(b"value3".to_vec()));
+
+    // Read non-existent key
+    let missing = db
+        .kv_read("test_namespace", "sub_namespace", "missing")
+        .await
+        .unwrap();
+    assert_eq!(missing, None);
+}
+
+/// Test KV store list operation
+pub async fn kvstore_list<DB>(db: DB)
+where
+    DB: Database<crate::database::Error>,
+{
+    // Write some test data
+    db.kv_write("test_namespace", "sub_namespace", "key1", b"value1")
+        .await
+        .unwrap();
+    db.kv_write("test_namespace", "sub_namespace", "key2", b"value2")
+        .await
+        .unwrap();
+    db.kv_write("test_namespace", "other_sub", "key3", b"value3")
+        .await
+        .unwrap();
+
+    // List keys in namespace
+    let mut keys = db.kv_list("test_namespace", "sub_namespace").await.unwrap();
+    keys.sort();
+    assert_eq!(keys, vec!["key1", "key2"]);
+
+    // List keys in other namespace
+    let other_keys = db.kv_list("test_namespace", "other_sub").await.unwrap();
+    assert_eq!(other_keys, vec!["key3"]);
+
+    // List keys in empty namespace
+    let empty_keys = db.kv_list("test_namespace", "empty_sub").await.unwrap();
+    assert!(empty_keys.is_empty());
+}
+
+/// Test KV store update operation
+pub async fn kvstore_update<DB>(db: DB)
+where
+    DB: Database<crate::database::Error>,
+{
+    // Write initial value
+    db.kv_write("test_namespace", "sub_namespace", "key1", b"value1")
+        .await
+        .unwrap();
+
+    // Verify initial value
+    let value = db
+        .kv_read("test_namespace", "sub_namespace", "key1")
+        .await
+        .unwrap();
+    assert_eq!(value, Some(b"value1".to_vec()));
+
+    // Update value
+    db.kv_write("test_namespace", "sub_namespace", "key1", b"updated_value1")
+        .await
+        .unwrap();
+
+    // Verify updated value
+    let value = db
+        .kv_read("test_namespace", "sub_namespace", "key1")
+        .await
+        .unwrap();
+    assert_eq!(value, Some(b"updated_value1".to_vec()));
+}
+
+/// Test KV store remove operation
+pub async fn kvstore_remove<DB>(db: DB)
+where
+    DB: Database<crate::database::Error>,
+{
+    // Write some test data
+    db.kv_write("test_namespace", "sub_namespace", "key1", b"value1")
+        .await
+        .unwrap();
+    db.kv_write("test_namespace", "sub_namespace", "key2", b"value2")
+        .await
+        .unwrap();
+
+    // Verify data exists
+    let keys = db.kv_list("test_namespace", "sub_namespace").await.unwrap();
+    assert_eq!(keys.len(), 2);
+
+    // Remove one key
+    db.kv_remove("test_namespace", "sub_namespace", "key1")
+        .await
+        .unwrap();
+
+    // Verify key is removed
+    let value = db
+        .kv_read("test_namespace", "sub_namespace", "key1")
+        .await
+        .unwrap();
+    assert_eq!(value, None);
+
+    // Verify other key still exists
+    let value = db
+        .kv_read("test_namespace", "sub_namespace", "key2")
+        .await
+        .unwrap();
+    assert_eq!(value, Some(b"value2".to_vec()));
+
+    // Verify list is updated
+    let keys = db.kv_list("test_namespace", "sub_namespace").await.unwrap();
+    assert_eq!(keys, vec!["key2"]);
+}
+
+/// Test KV store namespace isolation
+pub async fn kvstore_namespace_isolation<DB>(db: DB)
+where
+    DB: Database<crate::database::Error>,
+{
+    // Write same key to different namespaces
+    db.kv_write("ns1", "sub", "key", b"value_ns1")
+        .await
+        .unwrap();
+    db.kv_write("ns2", "sub", "key", b"value_ns2")
+        .await
+        .unwrap();
+    db.kv_write("ns1", "sub2", "key", b"value_sub2")
+        .await
+        .unwrap();
+
+    // Verify isolation by primary namespace
+    let value1 = db.kv_read("ns1", "sub", "key").await.unwrap();
+    assert_eq!(value1, Some(b"value_ns1".to_vec()));
+
+    let value2 = db.kv_read("ns2", "sub", "key").await.unwrap();
+    assert_eq!(value2, Some(b"value_ns2".to_vec()));
+
+    // Verify isolation by secondary namespace
+    let value3 = db.kv_read("ns1", "sub2", "key").await.unwrap();
+    assert_eq!(value3, Some(b"value_sub2".to_vec()));
+
+    // Remove from one namespace shouldn't affect others
+    db.kv_remove("ns1", "sub", "key").await.unwrap();
+
+    let value1 = db.kv_read("ns1", "sub", "key").await.unwrap();
+    assert_eq!(value1, None);
+
+    let value2 = db.kv_read("ns2", "sub", "key").await.unwrap();
+    assert_eq!(value2, Some(b"value_ns2".to_vec()));
+
+    let value3 = db.kv_read("ns1", "sub2", "key").await.unwrap();
+    assert_eq!(value3, Some(b"value_sub2".to_vec()));
+}
 
 /// Unit test that is expected to be passed for a correct wallet database implementation
 #[macro_export]
@@ -865,7 +1047,12 @@ macro_rules! wallet_db_test {
             add_and_get_transaction,
             list_transactions,
             filter_transactions_by_mint,
-            remove_transaction
+            remove_transaction,
+            kvstore_write_and_read,
+            kvstore_list,
+            kvstore_update,
+            kvstore_remove,
+            kvstore_namespace_isolation
         );
     };
     ($make_db_fn:ident, $($name:ident),+ $(,)?) => {
