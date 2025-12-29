@@ -150,6 +150,50 @@ where
     /// Remove transaction from storage
     async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Err>;
 
+    // Operation management methods
+
+    /// Add a wallet operation to storage
+    async fn add_operation(&self, operation: wallet::WalletOperation) -> Result<(), Err>;
+
+    /// Get a wallet operation by ID
+    async fn get_operation(&self, id: &str) -> Result<Option<wallet::WalletOperation>, Err>;
+
+    /// Update a wallet operation's state
+    async fn update_operation_state(
+        &self,
+        id: &str,
+        state: wallet::WalletOperationState,
+    ) -> Result<(), Err>;
+
+    /// Update a wallet operation
+    async fn update_operation(&self, operation: wallet::WalletOperation) -> Result<(), Err>;
+
+    /// Delete a wallet operation
+    async fn delete_operation(&self, id: &str) -> Result<(), Err>;
+
+    /// Get operations by state
+    async fn get_operations_by_state(
+        &self,
+        state: wallet::WalletOperationState,
+    ) -> Result<Vec<wallet::WalletOperation>, Err>;
+
+    /// Get all incomplete operations (not Finalized or RolledBack)
+    async fn get_incomplete_operations(&self) -> Result<Vec<wallet::WalletOperation>, Err>;
+
+    // Proof reservation methods
+
+    /// Reserve proofs for an operation
+    /// Sets proofs to Reserved state and marks them as used by the operation
+    /// Returns an error if any proofs are already reserved or not in Unspent state
+    async fn reserve_proofs(&self, ys: Vec<PublicKey>, operation_id: &str) -> Result<(), Err>;
+
+    /// Release proofs reserved by an operation
+    /// Sets proofs back to Unspent state and clears the used_by_operation field
+    async fn release_proofs(&self, operation_id: &str) -> Result<(), Err>;
+
+    /// Get proofs reserved by an operation
+    async fn get_reserved_proofs(&self, operation_id: &str) -> Result<Vec<ProofInfo>, Err>;
+
     // KV Store write methods (non-transactional)
 
     /// Write a value to the key-value store

@@ -204,7 +204,9 @@ where
             y,
             mint_url,
             state,
-            spending_condition
+            spending_condition,
+            used_by_operation,
+            created_by_operation
         FROM proof
         {for_update_clause}
         "#
@@ -583,7 +585,9 @@ where
                 y,
                 mint_url,
                 state,
-                spending_condition
+                spending_condition,
+                used_by_operation,
+                created_by_operation
             FROM proof
             WHERE y IN (:ys)
         "#,
@@ -751,9 +755,9 @@ where
             query(
                 r#"
     INSERT INTO proof
-    (y, mint_url, state, spending_condition, unit, amount, keyset_id, secret, c, witness, dleq_e, dleq_s, dleq_r)
+    (y, mint_url, state, spending_condition, unit, amount, keyset_id, secret, c, witness, dleq_e, dleq_s, dleq_r, used_by_operation, created_by_operation)
     VALUES
-    (:y, :mint_url, :state, :spending_condition, :unit, :amount, :keyset_id, :secret, :c, :witness, :dleq_e, :dleq_s, :dleq_r)
+    (:y, :mint_url, :state, :spending_condition, :unit, :amount, :keyset_id, :secret, :c, :witness, :dleq_e, :dleq_s, :dleq_r, :used_by_operation, :created_by_operation)
     ON CONFLICT(y) DO UPDATE SET
         mint_url = excluded.mint_url,
         state = excluded.state,
@@ -766,7 +770,9 @@ where
         witness = excluded.witness,
         dleq_e = excluded.dleq_e,
         dleq_s = excluded.dleq_s,
-        dleq_r = excluded.dleq_r
+        dleq_r = excluded.dleq_r,
+        used_by_operation = excluded.used_by_operation,
+        created_by_operation = excluded.created_by_operation
     ;
             "#,
             )?
@@ -803,6 +809,8 @@ where
                 "dleq_r",
                 proof.proof.dleq.as_ref().map(|dleq| dleq.r.to_secret_bytes().to_vec()),
             )
+            .bind("used_by_operation", proof.used_by_operation.as_deref())
+            .bind("created_by_operation", proof.created_by_operation.as_deref())
             .execute(&*conn)
             .await?;
         }
@@ -1272,6 +1280,272 @@ where
         Ok(())
     }
 
+    // Operation management methods
+
+    #[instrument(skip(self))]
+    async fn add_operation(
+        &self,
+        operation: wallet::WalletOperation,
+    ) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let data_json = serde_json::to_string(&operation.data).map_err(|e| {
+            Error::Database(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to serialize operation data: {}", e),
+            )))
+        })?;
+
+        query(
+            r#"
+            INSERT INTO wallet_operations
+            (id, kind, state, amount, mint_url, unit, created_at, updated_at, data)
+            VALUES
+            (:id, :kind, :state, :amount, :mint_url, :unit, :created_at, :updated_at, :data)
+            "#,
+        )?
+        .bind("id", operation.id)
+        .bind("kind", operation.kind.to_string())
+        .bind("state", operation.state.to_string())
+        .bind("amount", u64::from(operation.amount) as i64)
+        .bind("mint_url", operation.mint_url.to_string())
+        .bind("unit", operation.unit.to_string())
+        .bind("created_at", operation.created_at as i64)
+        .bind("updated_at", operation.updated_at as i64)
+        .bind("data", data_json)
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn get_operation(
+        &self,
+        id: &str,
+    ) -> Result<Option<wallet::WalletOperation>, database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let rows = query(
+            r#"
+            SELECT id, kind, state, amount, mint_url, unit, created_at, updated_at, data
+            FROM wallet_operations
+            WHERE id = :id
+            "#,
+        )?
+        .bind("id", id)
+        .fetch_all(&*conn)
+        .await?;
+
+        if rows.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(sql_row_to_wallet_operation(
+            rows.into_iter().next().unwrap(),
+        )?))
+    }
+
+    #[instrument(skip(self))]
+    async fn update_operation_state(
+        &self,
+        id: &str,
+        state: wallet::WalletOperationState,
+    ) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        query(
+            r#"
+            UPDATE wallet_operations
+            SET state = :state, updated_at = :updated_at
+            WHERE id = :id
+            "#,
+        )?
+        .bind("id", id)
+        .bind("state", state.to_string())
+        .bind("updated_at", now as i64)
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn update_operation(
+        &self,
+        operation: wallet::WalletOperation,
+    ) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let data_json = serde_json::to_string(&operation.data).map_err(|e| {
+            Error::Database(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to serialize operation data: {}", e),
+            )))
+        })?;
+
+        query(
+            r#"
+            UPDATE wallet_operations
+            SET kind = :kind, state = :state, amount = :amount, mint_url = :mint_url,
+                unit = :unit, updated_at = :updated_at, data = :data
+            WHERE id = :id
+            "#,
+        )?
+        .bind("id", operation.id)
+        .bind("kind", operation.kind.to_string())
+        .bind("state", operation.state.to_string())
+        .bind("amount", u64::from(operation.amount) as i64)
+        .bind("mint_url", operation.mint_url.to_string())
+        .bind("unit", operation.unit.to_string())
+        .bind("updated_at", operation.updated_at as i64)
+        .bind("data", data_json)
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn delete_operation(&self, id: &str) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        query(r#"DELETE FROM wallet_operations WHERE id = :id"#)?
+            .bind("id", id)
+            .execute(&*conn)
+            .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn get_operations_by_state(
+        &self,
+        state: wallet::WalletOperationState,
+    ) -> Result<Vec<wallet::WalletOperation>, database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let rows = query(
+            r#"
+            SELECT id, kind, state, amount, mint_url, unit, created_at, updated_at, data
+            FROM wallet_operations
+            WHERE state = :state
+            ORDER BY created_at DESC
+            "#,
+        )?
+        .bind("state", state.to_string())
+        .fetch_all(&*conn)
+        .await?;
+
+        rows.into_iter().map(sql_row_to_wallet_operation).collect()
+    }
+
+    #[instrument(skip(self))]
+    async fn get_incomplete_operations(
+        &self,
+    ) -> Result<Vec<wallet::WalletOperation>, database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let rows = query(
+            r#"
+            SELECT id, kind, state, amount, mint_url, unit, created_at, updated_at, data
+            FROM wallet_operations
+            WHERE state NOT IN ('finalized', 'rolled_back')
+            ORDER BY created_at ASC
+            "#,
+        )?
+        .fetch_all(&*conn)
+        .await?;
+
+        rows.into_iter().map(sql_row_to_wallet_operation).collect()
+    }
+
+    // Proof reservation methods
+
+    #[instrument(skip(self))]
+    async fn reserve_proofs(
+        &self,
+        ys: Vec<PublicKey>,
+        operation_id: &str,
+    ) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        for y in ys {
+            query(
+                r#"
+                UPDATE proof
+                SET state = 'RESERVED', used_by_operation = :operation_id
+                WHERE y = :y AND state = 'UNSPENT'
+                "#,
+            )?
+            .bind("y", y.to_bytes().to_vec())
+            .bind("operation_id", operation_id)
+            .execute(&*conn)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn release_proofs(&self, operation_id: &str) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        query(
+            r#"
+            UPDATE proof
+            SET state = 'UNSPENT', used_by_operation = NULL
+            WHERE used_by_operation = :operation_id
+            "#,
+        )?
+        .bind("operation_id", operation_id)
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn get_reserved_proofs(
+        &self,
+        operation_id: &str,
+    ) -> Result<Vec<ProofInfo>, database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let rows = query(
+            r#"
+            SELECT
+                amount,
+                unit,
+                keyset_id,
+                secret,
+                c,
+                witness,
+                dleq_e,
+                dleq_s,
+                dleq_r,
+                y,
+                mint_url,
+                state,
+                spending_condition,
+                used_by_operation,
+                created_by_operation
+            FROM proof
+            WHERE used_by_operation = :operation_id
+            "#,
+        )?
+        .bind("operation_id", operation_id)
+        .fetch_all(&*conn)
+        .await?;
+
+        rows.into_iter().map(sql_row_to_proof_info).collect()
+    }
+
     // KV Store write methods (non-transactional)
 
     async fn kv_write(
@@ -1454,7 +1728,9 @@ fn sql_row_to_proof_info(row: Vec<Column>) -> Result<ProofInfo, Error> {
             y,
             mint_url,
             state,
-            spending_condition
+            spending_condition,
+            used_by_operation,
+            created_by_operation
         ) = row
     );
 
@@ -1496,6 +1772,65 @@ fn sql_row_to_proof_info(row: Vec<Column>) -> Result<ProofInfo, Error> {
             |r| { serde_json::from_slice(&r).ok() }
         ),
         unit: column_as_string!(unit, CurrencyUnit::from_str),
+        used_by_operation: column_as_nullable_string!(used_by_operation),
+        created_by_operation: column_as_nullable_string!(created_by_operation),
+    })
+}
+
+fn sql_row_to_wallet_operation(row: Vec<Column>) -> Result<wallet::WalletOperation, Error> {
+    unpack_into!(
+        let (
+            id,
+            kind,
+            state,
+            amount,
+            mint_url,
+            unit,
+            created_at,
+            updated_at,
+            data
+        ) = row
+    );
+
+    let id: String = column_as_string!(id);
+    let kind_str: String = column_as_string!(kind);
+    let state_str: String = column_as_string!(state);
+    let amount: u64 = column_as_number!(amount);
+    let mint_url: MintUrl = column_as_string!(mint_url, MintUrl::from_str);
+    let unit: CurrencyUnit = column_as_string!(unit, CurrencyUnit::from_str);
+    let created_at: u64 = column_as_number!(created_at);
+    let updated_at: u64 = column_as_number!(updated_at);
+    let data_json: String = column_as_string!(data);
+
+    let kind = wallet::OperationKind::from_str(&kind_str).map_err(|_| {
+        Error::Database(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Invalid operation kind: {}", kind_str),
+        )))
+    })?;
+    let state = wallet::WalletOperationState::from_str(&state_str).map_err(|_| {
+        Error::Database(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Invalid operation state: {}", state_str),
+        )))
+    })?;
+    let data: wallet::OperationData = serde_json::from_str(&data_json).map_err(|e| {
+        Error::Database(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to deserialize operation data: {}", e),
+        )))
+    })?;
+
+    Ok(wallet::WalletOperation {
+        id,
+        kind,
+        state,
+        amount: Amount::from(amount),
+        mint_url,
+        unit,
+        created_at,
+        updated_at,
+        data,
     })
 }
 

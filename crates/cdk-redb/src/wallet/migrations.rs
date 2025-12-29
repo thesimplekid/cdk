@@ -200,3 +200,68 @@ pub(crate) fn migrate_03_to_04(db: Arc<Database>) -> Result<u32, Error> {
 
     Ok(4)
 }
+
+pub(crate) fn migrate_04_to_05(db: Arc<Database>) -> Result<u32, Error> {
+    use redb::TableDefinition;
+
+    const OPERATIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("wallet_operations");
+    const PROOFS_TABLE: TableDefinition<&[u8], &str> = TableDefinition::new("proofs");
+
+    let write_txn = db.begin_write().map_err(Error::from)?;
+
+    // Create the operations table
+    {
+        let _ = write_txn
+            .open_table(OPERATIONS_TABLE)
+            .map_err(Error::from)?;
+        tracing::info!("Created wallet_operations table");
+    }
+
+    // Update existing proofs to add operation tracking fields
+    // Read all existing proofs
+    let existing_proofs: Vec<(Vec<u8>, String)>;
+    {
+        let table = write_txn.open_table(PROOFS_TABLE).map_err(Error::from)?;
+        existing_proofs = table
+            .iter()
+            .map_err(Error::from)?
+            .flatten()
+            .map(|(y, proof_json)| (y.value().to_vec(), proof_json.value().to_string()))
+            .collect();
+    }
+
+    // Update each proof to include the new fields (if they don't already exist)
+    {
+        let mut table = write_txn.open_table(PROOFS_TABLE).map_err(Error::from)?;
+        let proof_count = existing_proofs.len();
+
+        for (y, proof_json) in existing_proofs {
+            // Parse the JSON, add the new fields if missing, and save back
+            if let Ok(mut proof_value) = serde_json::from_str::<serde_json::Value>(&proof_json) {
+                if let Some(obj) = proof_value.as_object_mut() {
+                    // Add the new fields if they don't exist
+                    if !obj.contains_key("used_by_operation") {
+                        obj.insert("used_by_operation".to_string(), serde_json::Value::Null);
+                    }
+                    if !obj.contains_key("created_by_operation") {
+                        obj.insert("created_by_operation".to_string(), serde_json::Value::Null);
+                    }
+
+                    // Serialize back and update
+                    if let Ok(updated_json) = serde_json::to_string(&proof_value) {
+                        table.insert(y.as_slice(), updated_json.as_str())?;
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "Updated {} proofs with operation tracking fields",
+            proof_count
+        );
+    }
+
+    write_txn.commit()?;
+
+    Ok(5)
+}

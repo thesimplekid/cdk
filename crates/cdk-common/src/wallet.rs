@@ -376,6 +376,270 @@ impl TryFrom<Proofs> for TransactionId {
     }
 }
 
+/// Wallet operation kind
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationKind {
+    /// Send operation
+    Send,
+    /// Receive operation
+    Receive,
+    /// Swap operation
+    Swap,
+    /// Mint operation
+    Mint,
+    /// Melt operation
+    Melt,
+}
+
+impl fmt::Display for OperationKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OperationKind::Send => write!(f, "send"),
+            OperationKind::Receive => write!(f, "receive"),
+            OperationKind::Swap => write!(f, "swap"),
+            OperationKind::Mint => write!(f, "mint"),
+            OperationKind::Melt => write!(f, "melt"),
+        }
+    }
+}
+
+impl FromStr for OperationKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "send" => Ok(OperationKind::Send),
+            "receive" => Ok(OperationKind::Receive),
+            "swap" => Ok(OperationKind::Swap),
+            "mint" => Ok(OperationKind::Mint),
+            "melt" => Ok(OperationKind::Melt),
+            _ => Err(Error::InvalidOperationKind),
+        }
+    }
+}
+
+/// Wallet operation state
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WalletOperationState {
+    /// Operation initialized but not yet prepared
+    Init,
+    /// Operation prepared (resources reserved)
+    Prepared,
+    /// Operation executing (API call in progress)
+    Executing,
+    /// Operation pending (waiting for confirmation)
+    Pending,
+    /// Operation finalized successfully
+    Finalized,
+    /// Operation rolled back due to error
+    RolledBack,
+}
+
+impl fmt::Display for WalletOperationState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WalletOperationState::Init => write!(f, "init"),
+            WalletOperationState::Prepared => write!(f, "prepared"),
+            WalletOperationState::Executing => write!(f, "executing"),
+            WalletOperationState::Pending => write!(f, "pending"),
+            WalletOperationState::Finalized => write!(f, "finalized"),
+            WalletOperationState::RolledBack => write!(f, "rolled_back"),
+        }
+    }
+}
+
+impl FromStr for WalletOperationState {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "init" => Ok(WalletOperationState::Init),
+            "prepared" => Ok(WalletOperationState::Prepared),
+            "executing" => Ok(WalletOperationState::Executing),
+            "pending" => Ok(WalletOperationState::Pending),
+            "finalized" => Ok(WalletOperationState::Finalized),
+            "rolled_back" => Ok(WalletOperationState::RolledBack),
+            _ => Err(Error::InvalidOperationState),
+        }
+    }
+}
+
+/// Operation-specific data for Send operations
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendOperationData {
+    /// Target amount to send
+    pub amount: Amount,
+    /// Memo for the send
+    pub memo: Option<String>,
+    /// Derivation counter start
+    pub counter_start: Option<u32>,
+    /// Derivation counter end
+    pub counter_end: Option<u32>,
+    /// Token data (when in Pending/Finalized state)
+    pub token: Option<String>,
+}
+
+/// Operation-specific data for Receive operations
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiveOperationData {
+    /// Token to receive
+    pub token: String,
+    /// Derivation counter start
+    pub counter_start: Option<u32>,
+    /// Derivation counter end
+    pub counter_end: Option<u32>,
+    /// Amount received
+    pub amount: Option<Amount>,
+}
+
+/// Operation-specific data for Swap operations
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwapOperationData {
+    /// Input amount
+    pub input_amount: Amount,
+    /// Output amount
+    pub output_amount: Amount,
+    /// Derivation counter start
+    pub counter_start: Option<u32>,
+    /// Derivation counter end
+    pub counter_end: Option<u32>,
+}
+
+/// Operation-specific data for Mint operations
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MintOperationData {
+    /// Quote ID
+    pub quote_id: String,
+    /// Amount to mint
+    pub amount: Amount,
+    /// Derivation counter start
+    pub counter_start: Option<u32>,
+    /// Derivation counter end
+    pub counter_end: Option<u32>,
+}
+
+/// Operation-specific data for Melt operations
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeltOperationData {
+    /// Quote ID
+    pub quote_id: String,
+    /// Amount to melt
+    pub amount: Amount,
+    /// Fee reserve
+    pub fee_reserve: Amount,
+    /// Derivation counter start
+    pub counter_start: Option<u32>,
+    /// Derivation counter end
+    pub counter_end: Option<u32>,
+    /// Change amount (if any)
+    pub change_amount: Option<Amount>,
+}
+
+/// Operation data enum
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum OperationData {
+    /// Send operation data
+    Send(SendOperationData),
+    /// Receive operation data
+    Receive(ReceiveOperationData),
+    /// Swap operation data
+    Swap(SwapOperationData),
+    /// Mint operation data
+    Mint(MintOperationData),
+    /// Melt operation data
+    Melt(MeltOperationData),
+}
+
+impl OperationData {
+    /// Get the operation kind
+    pub fn kind(&self) -> OperationKind {
+        match self {
+            OperationData::Send(_) => OperationKind::Send,
+            OperationData::Receive(_) => OperationKind::Receive,
+            OperationData::Swap(_) => OperationKind::Swap,
+            OperationData::Mint(_) => OperationKind::Mint,
+            OperationData::Melt(_) => OperationKind::Melt,
+        }
+    }
+}
+
+/// Wallet operation
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WalletOperation {
+    /// Unique operation ID
+    pub id: String,
+    /// Operation kind
+    pub kind: OperationKind,
+    /// Operation state
+    pub state: WalletOperationState,
+    /// Amount involved in the operation
+    pub amount: Amount,
+    /// Mint URL
+    pub mint_url: MintUrl,
+    /// Currency unit
+    pub unit: CurrencyUnit,
+    /// Creation timestamp (unix seconds)
+    pub created_at: u64,
+    /// Last update timestamp (unix seconds)
+    pub updated_at: u64,
+    /// Operation-specific data
+    pub data: OperationData,
+}
+
+impl WalletOperation {
+    /// Create a new wallet operation
+    pub fn new(
+        id: String,
+        kind: OperationKind,
+        amount: Amount,
+        mint_url: MintUrl,
+        unit: CurrencyUnit,
+        data: OperationData,
+    ) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        Self {
+            id,
+            kind,
+            state: WalletOperationState::Init,
+            amount,
+            mint_url,
+            unit,
+            created_at: now,
+            updated_at: now,
+            data,
+        }
+    }
+
+    /// Update the operation state
+    pub fn update_state(&mut self, state: WalletOperationState) {
+        self.state = state;
+        self.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+    }
+
+    /// Check if operation is complete
+    pub fn is_complete(&self) -> bool {
+        matches!(
+            self.state,
+            WalletOperationState::Finalized | WalletOperationState::RolledBack
+        )
+    }
+
+    /// Check if operation is incomplete
+    pub fn is_incomplete(&self) -> bool {
+        !self.is_complete()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
