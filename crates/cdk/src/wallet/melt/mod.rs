@@ -1,3 +1,12 @@
+//! Melt Module
+//!
+//! This module provides the melt functionality for the wallet, including:
+//! - Standard melt operations for Bolt11 and Bolt12 payments
+//! - `MeltSaga` - The type state pattern implementation for melt operations
+//!
+//! The `MeltSaga` provides compile-time safety for state transitions and automatic
+//! compensation on failure.
+
 use std::collections::HashMap;
 
 use cdk_common::util::unix_time;
@@ -13,6 +22,10 @@ mod melt_bolt11;
 mod melt_bolt12;
 #[cfg(feature = "wallet")]
 mod melt_lightning_address;
+pub mod saga;
+
+// Re-export saga types for convenience
+pub use saga::MeltSaga;
 
 impl Wallet {
     /// Check pending melt quotes
@@ -60,7 +73,7 @@ impl Wallet {
             );
             if response.state == MeltQuoteState::Paid {
                 let pending_proofs = self
-                    .get_proofs_with(Some(vec![State::Pending]), None)
+                    .get_proofs_with(None, Some(vec![State::Pending]), None)
                     .await?;
                 let proofs_total = pending_proofs.total_amount().unwrap_or_default();
                 let change_total = response.change_amount().unwrap_or_default();

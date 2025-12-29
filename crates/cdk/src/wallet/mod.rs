@@ -52,6 +52,8 @@ pub mod payment_request;
 mod proofs;
 mod receive;
 mod reclaim;
+mod recovery;
+pub mod saga;
 mod send;
 #[cfg(not(target_arch = "wasm32"))]
 mod streams;
@@ -64,6 +66,8 @@ pub mod util;
 pub use auth::{AuthMintConnector, AuthWallet};
 pub use builder::WalletBuilder;
 pub use cdk_common::wallet as types;
+pub use issue::MintSaga;
+pub use melt::MeltSaga;
 #[cfg(feature = "auth")]
 pub use mint_connector::http_client::AuthHttpClient as BaseAuthHttpClient;
 pub use mint_connector::http_client::HttpClient as BaseHttpClient;
@@ -75,8 +79,10 @@ pub use multi_mint_wallet::{MultiMintReceiveOptions, MultiMintSendOptions, Multi
 pub use payment_request::CreateRequestParams;
 #[cfg(feature = "nostr")]
 pub use payment_request::NostrWaitInfo;
-pub use receive::ReceiveOptions;
-pub use send::{PreparedSend, SendMemo, SendOptions};
+pub use receive::{ReceiveOptions, ReceiveSaga};
+pub use recovery::RecoveryReport;
+pub use send::{PreparedSend, SendMemo, SendOptions, SendSaga};
+pub use swap::SwapSaga;
 pub use types::{MeltQuote, MintQuote, SendKind};
 
 use crate::nuts::nut00::ProofsMethods;
@@ -276,12 +282,10 @@ impl Wallet {
     /// its URL
     #[instrument(skip(self))]
     pub async fn update_mint_url(&mut self, new_mint_url: MintUrl) -> Result<(), Error> {
-        // Update the mint URL in the wallet DB
         self.localstore
             .update_mint_url(self.mint_url.clone(), new_mint_url.clone())
             .await?;
 
-        // Update the mint URL in the wallet struct field
         self.mint_url = new_mint_url;
 
         Ok(())
@@ -379,7 +383,7 @@ impl Wallet {
         fee_and_amounts: &FeeAndAmounts,
     ) -> Result<Vec<Amount>, Error> {
         let unspent_proofs = self
-            .get_proofs_with(Some(vec![State::Unspent]), None)
+            .get_proofs_with(None, Some(vec![State::Unspent]), None)
             .await?;
 
         let amounts_count: HashMap<u64, u64> =
@@ -548,8 +552,6 @@ impl Wallet {
                 start_counter += 100;
             }
 
-            // Set counter to highest found + 1 to avoid reusing any counter values
-            // that already have signatures at the mint
             if let Some(highest) = highest_counter {
                 self.localstore
                     .increment_keyset_counter(&keyset.id, highest + 1)

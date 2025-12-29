@@ -275,4 +275,44 @@ impl WalletDatabase for WalletPostgresDatabase {
     async fn remove_keys(&self, id: Id) -> Result<(), FfiError> {
         self.inner.remove_keys(id).await
     }
+
+    // ========== Saga management methods ==========
+
+    async fn add_saga(&self, saga_json: String) -> Result<(), FfiError> {
+        self.inner.add_saga(saga_json).await
+    }
+
+    async fn get_saga(&self, id: String) -> Result<Option<String>, FfiError> {
+        self.inner.get_saga(id).await
+    }
+
+    async fn update_saga(&self, saga_json: String) -> Result<bool, FfiError> {
+        self.inner.update_saga(saga_json).await
+    }
+
+    async fn delete_saga(&self, id: String) -> Result<(), FfiError> {
+        self.inner.delete_saga(id).await
+    }
+
+    async fn get_incomplete_sagas(&self) -> Result<Vec<String>, FfiError> {
+        self.inner.get_incomplete_sagas().await
+    }
+
+    // ========== Proof reservation methods ==========
+
+    async fn reserve_proofs(
+        &self,
+        ys: Vec<PublicKey>,
+        operation_id: String,
+    ) -> Result<(), FfiError> {
+        self.inner.reserve_proofs(ys, operation_id).await
+    }
+
+    async fn release_proofs(&self, operation_id: String) -> Result<(), FfiError> {
+        self.inner.release_proofs(operation_id).await
+    }
+
+    async fn get_reserved_proofs(&self, operation_id: String) -> Result<Vec<ProofInfo>, FfiError> {
+        self.inner.get_reserved_proofs(operation_id).await
+    }
 }

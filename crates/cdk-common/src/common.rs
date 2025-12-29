@@ -82,6 +82,12 @@ pub struct ProofInfo {
     pub spending_condition: Option<SpendingConditions>,
     /// Unit
     pub unit: CurrencyUnit,
+    /// Operation ID that is using/spending this proof
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_by_operation: Option<String>,
+    /// Operation ID that created this proof
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_operation: Option<String>,
 }
 
 impl ProofInfo {
@@ -103,6 +109,33 @@ impl ProofInfo {
             state,
             spending_condition,
             unit,
+            used_by_operation: None,
+            created_by_operation: None,
+        })
+    }
+
+    /// Create new [`ProofInfo`] with operation tracking
+    pub fn new_with_operations(
+        proof: Proof,
+        mint_url: MintUrl,
+        state: State,
+        unit: CurrencyUnit,
+        used_by_operation: Option<String>,
+        created_by_operation: Option<String>,
+    ) -> Result<Self, Error> {
+        let y = proof.y()?;
+
+        let spending_condition: Option<SpendingConditions> = (&proof.secret).try_into().ok();
+
+        Ok(Self {
+            proof,
+            y,
+            mint_url,
+            state,
+            spending_condition,
+            unit,
+            used_by_operation,
+            created_by_operation,
         })
     }
 
