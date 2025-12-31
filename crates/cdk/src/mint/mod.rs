@@ -9,11 +9,10 @@ use cdk_common::amount::to_unit;
 use cdk_common::common::{PaymentProcessorKey, QuoteTTL};
 #[cfg(feature = "auth")]
 use cdk_common::database::DynMintAuthDatabase;
-use cdk_common::database::{self, DynMintDatabase};
-use cdk_common::nuts::{self, BlindSignature, BlindedMessage, CurrencyUnit, Id, Kind};
+use cdk_common::database::{self, Acquired, DynMintDatabase};
+use cdk_common::nuts::{BlindSignature, BlindedMessage, CurrencyUnit, Id};
 use cdk_common::payment::{DynMintPayment, WaitPaymentResponse};
 pub use cdk_common::quote_id::QuoteId;
-use cdk_common::secret;
 #[cfg(feature = "prometheus")]
 use cdk_prometheus::global;
 use cdk_signatory::signatory::{Signatory, SignatoryKeySet};
@@ -685,13 +684,13 @@ impl Mint {
 
         let mut tx = localstore.begin_transaction().await?;
 
-        if let Ok(Some(mint_quote)) = tx
+        if let Ok(Some(mut mint_quote)) = tx
             .get_mint_quote_by_request_lookup_id(&wait_payment_response.payment_identifier)
             .await
         {
             Self::handle_mint_quote_payment(
                 &mut tx,
-                &mint_quote,
+                &mut mint_quote,
                 wait_payment_response,
                 pubsub_manager,
             )
@@ -710,8 +709,8 @@ impl Mint {
     /// Handle payment for a specific mint quote (extracted from pay_mint_quote)
     #[instrument(skip_all)]
     async fn handle_mint_quote_payment(
-        tx: &mut Box<dyn database::MintTransaction<'_, database::Error> + Send + Sync + '_>,
-        mint_quote: &MintQuote,
+        tx: &mut Box<dyn database::MintTransaction<database::Error> + Send + Sync>,
+        mint_quote: &mut Acquired<MintQuote>,
         wait_payment_response: WaitPaymentResponse,
         pubsub_manager: &Arc<PubSubManager>,
     ) -> Result<(), Error> {
@@ -750,14 +749,24 @@ impl Mint {
                     payment_amount_quote_unit
                 );
 
-                let total_paid = tx
-                    .increment_mint_quote_amount_paid(
-                        &mint_quote.id,
-                        payment_amount_quote_unit,
-                        wait_payment_response.payment_id,
-                    )
-                    .await?;
-                pubsub_manager.mint_quote_payment(mint_quote, total_paid);
+                match mint_quote.add_payment(
+                    payment_amount_quote_unit,
+                    wait_payment_response.payment_id.clone(),
+                    None,
+                ) {
+                    Ok(()) => {
+                        tx.update_mint_quote(mint_quote).await?;
+                        pubsub_manager.mint_quote_payment(mint_quote, mint_quote.amount_paid());
+                    }
+                    Err(Error::DuplicatePaymentId) => {
+                        tracing::info!(
+                            "Payment ID {} already processed (caught race condition)",
+                            wait_payment_response.payment_id
+                        );
+                        // This is fine - another concurrent request already processed this payment
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         } else {
             tracing::info!("Received payment notification for already seen payment.");
@@ -768,7 +777,10 @@ impl Mint {
 
     /// Fee required for proof set
     #[instrument(skip_all)]
-    pub async fn get_proofs_fee(&self, proofs: &Proofs) -> Result<Amount, Error> {
+    pub async fn get_proofs_fee(
+        &self,
+        proofs: &Proofs,
+    ) -> Result<crate::fees::ProofsFeeBreakdown, Error> {
         let mut proofs_per_keyset = HashMap::new();
         let mut fee_per_keyset = HashMap::new();
 
@@ -788,9 +800,9 @@ impl Mint {
                 .or_insert(1);
         }
 
-        let fee = calculate_fee(&proofs_per_keyset, &fee_per_keyset)?;
+        let fee_breakdown = calculate_fee(&proofs_per_keyset, &fee_per_keyset)?;
 
-        Ok(fee)
+        Ok(fee_breakdown)
     }
 
     /// Get active keysets
@@ -853,39 +865,12 @@ impl Mint {
     /// Verify [`Proof`] meets conditions and is signed
     #[tracing::instrument(skip_all)]
     pub async fn verify_proofs(&self, proofs: Proofs) -> Result<(), Error> {
+        // This ignore P2PK and HTLC, as all NUT-10 spending conditions are
+        // checked elsewhere.
         #[cfg(feature = "prometheus")]
         global::inc_in_flight_requests("verify_proofs");
 
-        let result = async {
-            proofs
-                .iter()
-                .map(|proof| {
-                    // Check if secret is a nut10 secret with conditions
-                    if let Ok(secret) =
-                        <&secret::Secret as TryInto<nuts::nut10::Secret>>::try_into(&proof.secret)
-                    {
-                        // Checks and verifies known secret kinds.
-                        // If it is an unknown secret kind it will be treated as a normal secret.
-                        // Spending conditions will **not** be check. It is up to the wallet to ensure
-                        // only supported secret kinds are used as there is no way for the mint to
-                        // enforce only signing supported secrets as they are blinded at
-                        // that point.
-                        match secret.kind() {
-                            Kind::P2PK => {
-                                proof.verify_p2pk()?;
-                            }
-                            Kind::HTLC => {
-                                proof.verify_htlc()?;
-                            }
-                        }
-                    }
-                    Ok(())
-                })
-                .collect::<Result<Vec<()>, Error>>()?;
-
-            self.signatory.verify_proofs(proofs).await
-        }
-        .await;
+        let result = self.signatory.verify_proofs(proofs).await;
 
         #[cfg(feature = "prometheus")]
         {
@@ -951,21 +936,10 @@ impl Mint {
         global::inc_in_flight_requests("total_issued");
 
         let result = async {
-            let keysets = self.keysets().keysets;
-
-            let mut total_issued = HashMap::new();
-
-            for keyset in keysets {
-                let blinded = self
-                    .localstore
-                    .get_blind_signatures_for_keyset(&keyset.id)
-                    .await?;
-
-                let total = Amount::try_sum(blinded.iter().map(|b| b.amount))?;
-
-                total_issued.insert(keyset.id, total);
+            let mut total_issued = self.localstore.get_total_issued().await?;
+            for keyset in self.keysets().keysets {
+                total_issued.entry(keyset.id).or_default();
             }
-
             Ok(total_issued)
         }
         .await;
@@ -985,28 +959,19 @@ impl Mint {
         #[cfg(feature = "prometheus")]
         global::inc_in_flight_requests("total_redeemed");
 
-        let keysets = self.signatory.keysets().await?;
-
-        let mut total_redeemed = HashMap::new();
-
-        for keyset in keysets.keysets {
-            let (proofs, state) = self.localstore.get_proofs_by_keyset_id(&keyset.id).await?;
-
-            let total_spent =
-                Amount::try_sum(proofs.iter().zip(state).filter_map(|(p, s)| {
-                    match s == Some(State::Spent) {
-                        true => Some(p.amount),
-                        false => None,
-                    }
-                }))?;
-
-            total_redeemed.insert(keyset.id, total_spent);
+        let total_redeemed = async {
+            let mut total_redeemed = self.localstore.get_total_redeemed().await?;
+            for keyset in self.keysets().keysets {
+                total_redeemed.entry(keyset.id).or_default();
+            }
+            Ok(total_redeemed)
         }
+        .await;
 
         #[cfg(feature = "prometheus")]
         global::dec_in_flight_requests("total_redeemed");
 
-        Ok(total_redeemed)
+        total_redeemed
     }
 }
 
@@ -1108,7 +1073,7 @@ mod tests {
         let first_keyset_id = keysets.keysets[0].id;
 
         // set the first keyset to inactive and generate a new keyset
-        mint.rotate_keyset(CurrencyUnit::default(), 1, 1)
+        mint.rotate_keyset(CurrencyUnit::default(), vec![1], 1)
             .await
             .expect("test");
 

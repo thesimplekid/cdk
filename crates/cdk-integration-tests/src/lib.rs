@@ -36,6 +36,17 @@ pub mod init_pure_tests;
 pub mod init_regtest;
 pub mod shared;
 
+/// Generate standard keyset amounts as powers of 2
+///
+/// Returns a vector of amounts: [1, 2, 4, 8, 16, 32, ..., 2^(n-1)]
+/// where n is the number of amounts to generate.
+///
+/// # Arguments
+/// * `max_order` - The maximum power of 2 (exclusive). For example, max_order=32 generates amounts up to 2^31
+pub fn standard_keyset_amounts(max_order: u32) -> Vec<u64> {
+    (0..max_order).map(|n| 2u64.pow(n)).collect()
+}
+
 pub async fn fund_wallet(wallet: Arc<Wallet>, amount: Amount) {
     let quote = wallet
         .mint_quote(amount, None)
@@ -64,7 +75,7 @@ pub fn get_second_mint_url_from_env() -> String {
     }
 }
 
-// This is the ln wallet we use to send/receive ln payements as the wallet
+// This is the ln wallet we use to send/receive ln payments as the wallet
 pub async fn init_lnd_client(work_dir: &Path) -> LndClient {
     let lnd_dir = get_lnd_dir(work_dir, "one");
     let cert_file = lnd_dir.join("tls.cert");
@@ -133,7 +144,7 @@ pub async fn create_invoice_for_env(amount_sat: Option<u64>) -> Result<String> {
     }
 }
 
-// This is the ln wallet we use to send/receive ln payements as the wallet
+// This is the ln wallet we use to send/receive ln payments as the wallet
 async fn _get_lnd_client() -> LndClient {
     let temp_dir = get_work_dir();
 

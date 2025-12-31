@@ -26,11 +26,16 @@ impl Wallet {
         opts: ReceiveOptions,
         memo: Option<String>,
     ) -> Result<Amount, Error> {
+        // Incase the wallet is getting ecash for the first time
+        // we want to get the mint info for our db
+        let _mint_info = self.load_mint_info().await?;
+
         let mint_url = &self.mint_url;
 
-        self.refresh_keysets().await?;
-
         let active_keyset_id = self.fetch_active_keyset().await?.id;
+        let fee_and_amounts = self
+            .get_keyset_fees_and_amounts_by_id(active_keyset_id)
+            .await?;
 
         let keys = self.load_keyset_keys(active_keyset_id).await?;
 
@@ -106,18 +111,30 @@ impl Wallet {
             }
         }
 
+        let fee_breakdown = self.get_proofs_fee(&proofs).await?;
+
         // Since the proofs are unknown they need to be added to the database
         let proofs_info = proofs
             .clone()
             .into_iter()
             .map(|p| ProofInfo::new(p, self.mint_url.clone(), State::Pending, self.unit.clone()))
             .collect::<Result<Vec<ProofInfo>, _>>()?;
-        self.localstore
-            .update_proofs(proofs_info.clone(), vec![])
-            .await?;
+
+        let mut tx = self.localstore.begin_db_transaction().await?;
+        tx.update_proofs(proofs_info.clone(), vec![]).await?;
 
         let mut pre_swap = self
-            .create_swap(None, opts.amount_split_target, proofs, None, false)
+            .create_swap(
+                tx,
+                active_keyset_id,
+                &fee_and_amounts,
+                None,
+                opts.amount_split_target,
+                proofs,
+                None,
+                false,
+                &fee_breakdown,
+            )
             .await?;
 
         if sig_flag.eq(&SigFlag::SigAll) {
@@ -128,7 +145,20 @@ impl Wallet {
             }
         }
 
-        let swap_response = self.client.post_swap(pre_swap.swap_request).await?;
+        let swap_response = match self.client.post_swap(pre_swap.swap_request).await {
+            Ok(response) => response,
+            Err(err) => {
+                tracing::error!("Failed to post swap request: {}", err);
+
+                // Remove the pending proofs we added since the swap failed
+                let mut tx = self.localstore.begin_db_transaction().await?;
+                tx.update_proofs(vec![], proofs_info.into_iter().map(|p| p.y).collect())
+                    .await?;
+                tx.commit().await?;
+
+                return Err(err);
+            }
+        };
 
         // Proof to keep
         let recv_proofs = construct_proofs(
@@ -138,8 +168,8 @@ impl Wallet {
             &keys,
         )?;
 
-        self.localstore
-            .increment_keyset_counter(&active_keyset_id, recv_proofs.len() as u32)
+        let mut tx = self.localstore.begin_db_transaction().await?;
+        tx.increment_keyset_counter(&active_keyset_id, recv_proofs.len() as u32)
             .await?;
 
         let total_amount = recv_proofs.total_amount()?;
@@ -148,30 +178,32 @@ impl Wallet {
             .into_iter()
             .map(|proof| ProofInfo::new(proof, mint_url.clone(), State::Unspent, self.unit.clone()))
             .collect::<Result<Vec<ProofInfo>, _>>()?;
-        self.localstore
-            .update_proofs(
-                recv_proof_infos,
-                proofs_info.into_iter().map(|p| p.y).collect(),
-            )
-            .await?;
+
+        tx.update_proofs(
+            recv_proof_infos,
+            proofs_info.into_iter().map(|p| p.y).collect(),
+        )
+        .await?;
 
         // Add transaction to store
-        self.localstore
-            .add_transaction(Transaction {
-                mint_url: self.mint_url.clone(),
-                direction: TransactionDirection::Incoming,
-                amount: total_amount,
-                fee: proofs_amount - total_amount,
-                unit: self.unit.clone(),
-                ys: proofs_ys,
-                timestamp: unix_time(),
-                memo,
-                metadata: opts.metadata,
-                quote_id: None,
-                payment_request: None,
-                payment_proof: None,
-            })
-            .await?;
+        tx.add_transaction(Transaction {
+            mint_url: self.mint_url.clone(),
+            direction: TransactionDirection::Incoming,
+            amount: total_amount,
+            fee: proofs_amount - total_amount,
+            unit: self.unit.clone(),
+            ys: proofs_ys,
+            timestamp: unix_time(),
+            memo,
+            metadata: opts.metadata,
+            quote_id: None,
+            payment_request: None,
+            payment_proof: None,
+            payment_method: None,
+        })
+        .await?;
+
+        tx.commit().await?;
 
         Ok(total_amount)
     }

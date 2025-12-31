@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use axum::Router;
 use bip39::Mnemonic;
-use cdk::cdk_database::{self, MintDatabase, MintKVStore, MintKeysDatabase};
+use cdk::cdk_database::{self, KVStore, MintDatabase, MintKeysDatabase};
 use cdk::mint::{Mint, MintBuilder, MintMeltLimits};
 #[cfg(any(
     feature = "cln",
@@ -100,7 +100,7 @@ async fn initial_setup(
 ) -> Result<(
     DynMintDatabase,
     Arc<dyn MintKeysDatabase<Err = cdk_database::Error> + Send + Sync>,
-    Arc<dyn MintKVStore<Err = cdk_database::Error> + Send + Sync>,
+    Arc<dyn KVStore<Err = cdk_database::Error> + Send + Sync>,
 )> {
     let (localstore, keystore, kv) = setup_database(settings, work_dir, db_password).await?;
     Ok((localstore, keystore, kv))
@@ -116,11 +116,13 @@ pub fn setup_tracing(
     let default_filter = "debug";
     let hyper_filter = "hyper=warn,rustls=warn,reqwest=warn";
     let h2_filter = "h2=warn";
+    let tower_filter = "tower=warn";
     let tower_http = "tower_http=warn";
     let rustls = "rustls=warn";
+    let tungstenite = "tungstenite=warn";
 
     let env_filter = EnvFilter::new(format!(
-        "{default_filter},{hyper_filter},{h2_filter},{tower_http},{rustls}"
+        "{default_filter},{hyper_filter},{h2_filter},{tower_filter},{tower_http},{rustls},{tungstenite}"
     ));
 
     use config::LoggingOutput;
@@ -260,14 +262,14 @@ async fn setup_database(
 ) -> Result<(
     DynMintDatabase,
     Arc<dyn MintKeysDatabase<Err = cdk_database::Error> + Send + Sync>,
-    Arc<dyn MintKVStore<Err = cdk_database::Error> + Send + Sync>,
+    Arc<dyn KVStore<Err = cdk_database::Error> + Send + Sync>,
 )> {
     match settings.database.engine {
         #[cfg(feature = "sqlite")]
         DatabaseEngine::Sqlite => {
             let db = setup_sqlite_database(_work_dir, _db_password).await?;
             let localstore: Arc<dyn MintDatabase<cdk_database::Error> + Send + Sync> = db.clone();
-            let kv: Arc<dyn MintKVStore<Err = cdk_database::Error> + Send + Sync> = db.clone();
+            let kv: Arc<dyn KVStore<Err = cdk_database::Error> + Send + Sync> = db.clone();
             let keystore: Arc<dyn MintKeysDatabase<Err = cdk_database::Error> + Send + Sync> = db;
             Ok((localstore, keystore, kv))
         }
@@ -288,7 +290,7 @@ async fn setup_database(
             let localstore: Arc<dyn MintDatabase<cdk_database::Error> + Send + Sync> =
                 pg_db.clone();
             #[cfg(feature = "postgres")]
-            let kv: Arc<dyn MintKVStore<Err = cdk_database::Error> + Send + Sync> = pg_db.clone();
+            let kv: Arc<dyn KVStore<Err = cdk_database::Error> + Send + Sync> = pg_db.clone();
             #[cfg(feature = "postgres")]
             let keystore: Arc<
                 dyn MintKeysDatabase<Err = cdk_database::Error> + Send + Sync,
@@ -322,7 +324,9 @@ async fn setup_sqlite_database(
     #[cfg(feature = "sqlcipher")]
     let db = {
         // Get password from command line arguments for sqlcipher
-        MintSqliteDatabase::new((sql_db_path, _password.unwrap())).await?
+        let password = _password
+            .ok_or_else(|| anyhow!("Password required when sqlcipher feature is enabled"))?;
+        MintSqliteDatabase::new((sql_db_path, password)).await?
     };
 
     Ok(Arc::new(db))
@@ -337,7 +341,7 @@ async fn configure_mint_builder(
     mint_builder: MintBuilder,
     runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
     work_dir: &Path,
-    kv_store: Option<Arc<dyn MintKVStore<Err = cdk::cdk_database::Error> + Send + Sync>>,
+    kv_store: Option<Arc<dyn KVStore<Err = cdk::cdk_database::Error> + Send + Sync>>,
 ) -> Result<MintBuilder> {
     // Configure basic mint information
     let mint_builder = configure_basic_info(settings, mint_builder);
@@ -408,7 +412,7 @@ async fn configure_lightning_backend(
     mut mint_builder: MintBuilder,
     _runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
     work_dir: &Path,
-    _kv_store: Option<Arc<dyn MintKVStore<Err = cdk::cdk_database::Error> + Send + Sync>>,
+    _kv_store: Option<Arc<dyn KVStore<Err = cdk::cdk_database::Error> + Send + Sync>>,
 ) -> Result<MintBuilder> {
     let mint_melt_limits = MintMeltLimits {
         mint_min: settings.ln.min_mint,
@@ -649,7 +653,10 @@ async fn setup_authentication(
                     #[cfg(feature = "sqlcipher")]
                     let sqlite_db = {
                         // Get password from command line arguments for sqlcipher
-                        MintSqliteAuthDatabase::new((sql_db_path, _password.unwrap())).await?
+                        let password = _password.clone().ok_or_else(|| {
+                            anyhow!("Password required when sqlcipher feature is enabled")
+                        })?;
+                        MintSqliteAuthDatabase::new((sql_db_path, password)).await?
                     };
 
                     Arc::new(sqlite_db)
@@ -886,12 +893,17 @@ async fn start_services_with_shutdown(
 
                 let tls_dir = rpc_settings.tls_dir_path.unwrap_or(work_dir.join("tls"));
 
-                if !tls_dir.exists() {
-                    tracing::error!("TLS directory does not exist: {}", tls_dir.display());
-                    bail!("Cannot start RPC server: TLS directory does not exist");
-                }
+                let tls_dir = if tls_dir.exists() {
+                    Some(tls_dir)
+                } else {
+                    tracing::warn!(
+                        "TLS directory does not exist: {}. Starting RPC server in INSECURE mode without TLS encryption",
+                        tls_dir.display()
+                    );
+                    None
+                };
 
-                mint_rpc.start(Some(tls_dir)).await?;
+                mint_rpc.start(tls_dir).await?;
 
                 rpc_server = Some(mint_rpc);
 
@@ -1013,16 +1025,13 @@ async fn start_services_with_shutdown(
         }
     };
 
-    #[cfg(not(feature = "prometheus"))]
-    let prometheus_handle: Option<tokio::task::JoinHandle<()>> = None;
-
     mint.start().await?;
 
     let socket_addr = SocketAddr::from_str(&format!("{listen_addr}:{listen_port}"))?;
 
     let listener = tokio::net::TcpListener::bind(socket_addr).await?;
 
-    tracing::info!("listening on {}", listener.local_addr().unwrap());
+    tracing::info!("listening on {}", listener.local_addr()?);
 
     // Create a task to wait for the shutdown signal and broadcast it
     let shutdown_broadcast_task = {

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use crate::error::FfiError;
-use crate::{Amount, CurrencyUnit, MintUrl, Proofs};
+use crate::{Amount, CurrencyUnit, KeySetInfo, MintUrl, Proofs};
 
 /// FFI-compatible Token
 #[derive(Debug, uniffi::Object)]
@@ -78,6 +78,13 @@ impl Token {
         Ok(proofs.into_iter().map(|p| p.into()).collect())
     }
 
+    /// Get proofs from the token
+    pub fn proofs(&self, mint_keysets: Vec<KeySetInfo>) -> Result<Proofs, FfiError> {
+        let mint_keysets: Vec<_> = mint_keysets.into_iter().map(|k| k.into()).collect();
+        let proofs = self.inner.proofs(&mint_keysets)?;
+        Ok(proofs.into_iter().map(|p| p.into()).collect())
+    }
+
     /// Convert token to raw bytes
     pub fn to_raw_bytes(&self) -> Result<Vec<u8>, FfiError> {
         Ok(self.inner.to_raw_bytes()?)
@@ -86,6 +93,13 @@ impl Token {
     /// Encode token to string representation
     pub fn encode(&self) -> String {
         self.to_string()
+    }
+
+    /// Decode token from raw bytes
+    #[uniffi::constructor]
+    pub fn from_raw_bytes(bytes: Vec<u8>) -> Result<Token, FfiError> {
+        let token = cdk::nuts::Token::try_from(&bytes)?;
+        Ok(Token { inner: token })
     }
 
     /// Decode token from string representation

@@ -59,6 +59,20 @@ impl MintConnector for DirectMintConnection {
         panic!("Not implemented");
     }
 
+    async fn fetch_lnurl_pay_request(
+        &self,
+        _url: &str,
+    ) -> Result<cdk::wallet::LnurlPayResponse, Error> {
+        unimplemented!("Lightning address not supported in DirectMintConnection")
+    }
+
+    async fn fetch_lnurl_invoice(
+        &self,
+        _url: &str,
+    ) -> Result<cdk::wallet::LnurlPayInvoiceResponse, Error> {
+        unimplemented!("Lightning address not supported in DirectMintConnection")
+    }
+
     async fn get_mint_keys(&self) -> Result<Vec<KeySet>, Error> {
         Ok(self.mint.pubkeys().keysets)
     }
@@ -244,7 +258,7 @@ pub async fn create_and_start_test_mint() -> Result<Mint> {
 
     let fee_reserve = FeeReserve {
         min_fee_reserve: 1.into(),
-        percent_fee_reserve: 1.0,
+        percent_fee_reserve: 0.02,
     };
 
     let ln_fake_backend = FakeWallet::new(
@@ -301,7 +315,7 @@ pub async fn create_test_wallet_for_mint(mint: Mint) -> Result<Wallet> {
     // Read environment variable to determine database type
     let db_type = env::var("CDK_TEST_DB_TYPE").expect("Database type set");
 
-    let localstore: Arc<dyn WalletDatabase<Err = cdk_database::Error> + Send + Sync> =
+    let localstore: Arc<dyn WalletDatabase<cdk_database::Error> + Send + Sync> =
         match db_type.to_lowercase().as_str() {
             "sqlite" => {
                 // Create a temporary directory for SQLite database

@@ -1,6 +1,7 @@
 #![cfg(test)]
 //! Test helpers for creating test mints and related utilities
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -20,18 +21,39 @@ use crate::mint::{Mint, MintBuilder, MintMeltLimits};
 use crate::types::{FeeReserve, QuoteTTL};
 use crate::Error;
 
+thread_local! {
+    /// Thread-local storage for test failure flags.
+    /// Using thread-local instead of env vars prevents race conditions
+    /// when tests run in parallel (each test thread has its own copy).
+    static TEST_FAILURES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Sets a failure flag for the current thread only.
+/// Use this instead of `std::env::set_var("TEST_FAIL_X", "1")`.
+#[cfg(test)]
+pub(crate) fn set_fail_for(operation: &str) {
+    TEST_FAILURES.with(|failures| {
+        failures.borrow_mut().push(operation.to_string());
+    });
+}
+
+/// Clears a failure flag for the current thread only.
+/// Use this instead of `std::env::remove_var("TEST_FAIL_X")`.
+#[cfg(test)]
+pub(crate) fn clear_fail_for(operation: &str) {
+    TEST_FAILURES.with(|failures| {
+        failures.borrow_mut().retain(|s| s != operation);
+    });
+}
+
 #[cfg(test)]
 pub(crate) fn should_fail_in_test() -> bool {
-    // Some condition that determines when to fail in tests
-    std::env::var("TEST_FAIL").is_ok()
+    TEST_FAILURES.with(|failures| failures.borrow().contains(&"GENERAL".to_string()))
 }
 
 #[cfg(test)]
 pub(crate) fn should_fail_for(operation: &str) -> bool {
-    // Check for specific failure modes using environment variables
-    // Format: TEST_FAIL_<OPERATION>
-    let var_name = format!("TEST_FAIL_{}", operation);
-    std::env::var(&var_name).is_ok()
+    TEST_FAILURES.with(|failures| failures.borrow().contains(&operation.to_string()))
 }
 
 /// Creates and starts a test mint with in-memory storage and a fake Lightning backend.
@@ -137,11 +159,7 @@ pub async fn mint_test_proofs(mint: &Mint, amount: Amount) -> Result<Proofs, Err
         sleep(Duration::from_secs(1)).await;
     }
 
-    let keysets = mint
-        .get_active_keysets()
-        .get(&CurrencyUnit::Sat)
-        .unwrap()
-        .clone();
+    let keysets = *mint.get_active_keysets().get(&CurrencyUnit::Sat).unwrap();
 
     let keys = mint
         .keyset_pubkeys(&keysets)?
@@ -151,10 +169,7 @@ pub async fn mint_test_proofs(mint: &Mint, amount: Amount) -> Result<Proofs, Err
         .keys
         .clone();
 
-    let fees: (u64, Vec<u64>) = (
-        0,
-        keys.iter().map(|a| a.0.to_u64()).collect::<Vec<_>>().into(),
-    );
+    let fees: (u64, Vec<u64>) = (0, keys.iter().map(|a| a.0.to_u64()).collect::<Vec<_>>());
 
     let premint_secrets =
         PreMintSecrets::random(keysets, amount, &SplitTarget::None, &fees.into()).unwrap();

@@ -49,7 +49,7 @@ impl FromStr for OperationKind {
             "swap" => Ok(OperationKind::Swap),
             "mint" => Ok(OperationKind::Mint),
             "melt" => Ok(OperationKind::Melt),
-            _ => Err(Error::Custom(format!("Invalid operation kind: {}", value))),
+            _ => Err(Error::Custom(format!("Invalid operation kind: {value}"))),
         }
     }
 }
@@ -80,7 +80,7 @@ impl FromStr for SwapSagaState {
         match value.as_str() {
             "setup_complete" => Ok(SwapSagaState::SetupComplete),
             "signed" => Ok(SwapSagaState::Signed),
-            _ => Err(Error::Custom(format!("Invalid swap saga state: {}", value))),
+            _ => Err(Error::Custom(format!("Invalid swap saga state: {value}"))),
         }
     }
 }
@@ -91,15 +91,15 @@ impl FromStr for SwapSagaState {
 pub enum MeltSagaState {
     /// Setup complete (proofs reserved, quote verified)
     SetupComplete,
-    /// Payment sent to Lightning network
-    PaymentSent,
+    /// Payment attempted to Lightning network (may or may not have succeeded)
+    PaymentAttempted,
 }
 
 impl fmt::Display for MeltSagaState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MeltSagaState::SetupComplete => write!(f, "setup_complete"),
-            MeltSagaState::PaymentSent => write!(f, "payment_sent"),
+            MeltSagaState::PaymentAttempted => write!(f, "payment_attempted"),
         }
     }
 }
@@ -110,7 +110,7 @@ impl FromStr for MeltSagaState {
         let value = value.to_lowercase();
         match value.as_str() {
             "setup_complete" => Ok(MeltSagaState::SetupComplete),
-            "payment_sent" => Ok(MeltSagaState::PaymentSent),
+            "payment_attempted" => Ok(MeltSagaState::PaymentAttempted),
             _ => Err(Error::Custom(format!("Invalid melt saga state: {}", value))),
         }
     }
@@ -147,7 +147,7 @@ impl SagaStateEnum {
             },
             SagaStateEnum::Melt(state) => match state {
                 MeltSagaState::SetupComplete => "setup_complete",
-                MeltSagaState::PaymentSent => "payment_sent",
+                MeltSagaState::PaymentAttempted => "payment_attempted",
             },
         }
     }
@@ -162,10 +162,6 @@ pub struct Saga {
     pub operation_kind: OperationKind,
     /// Current saga state (operation-specific)
     pub state: SagaStateEnum,
-    /// Blinded secrets (B values) from output blinded messages
-    pub blinded_secrets: Vec<PublicKey>,
-    /// Y values (public keys) from input proofs
-    pub input_ys: Vec<PublicKey>,
     /// Quote ID for melt operations (used for payment status lookup during recovery)
     /// None for swap operations
     pub quote_id: Option<String>,
@@ -177,19 +173,12 @@ pub struct Saga {
 
 impl Saga {
     /// Create new swap saga
-    pub fn new_swap(
-        operation_id: Uuid,
-        state: SwapSagaState,
-        blinded_secrets: Vec<PublicKey>,
-        input_ys: Vec<PublicKey>,
-    ) -> Self {
+    pub fn new_swap(operation_id: Uuid, state: SwapSagaState) -> Self {
         let now = unix_time();
         Self {
             operation_id,
             operation_kind: OperationKind::Swap,
             state: SagaStateEnum::Swap(state),
-            blinded_secrets,
-            input_ys,
             quote_id: None,
             created_at: now,
             updated_at: now,
@@ -203,20 +192,12 @@ impl Saga {
     }
 
     /// Create new melt saga
-    pub fn new_melt(
-        operation_id: Uuid,
-        state: MeltSagaState,
-        input_ys: Vec<PublicKey>,
-        blinded_secrets: Vec<PublicKey>,
-        quote_id: String,
-    ) -> Self {
+    pub fn new_melt(operation_id: Uuid, state: MeltSagaState, quote_id: String) -> Self {
         let now = unix_time();
         Self {
             operation_id,
             operation_kind: OperationKind::Melt,
             state: SagaStateEnum::Melt(state),
-            blinded_secrets,
-            input_ys,
             quote_id: Some(quote_id),
             created_at: now,
             updated_at: now,
@@ -231,57 +212,168 @@ impl Saga {
 }
 
 /// Operation
-pub enum Operation {
-    /// Mint
-    Mint(Uuid),
-    /// Melt
-    Melt(Uuid),
-    /// Swap
-    Swap(Uuid),
+pub struct Operation {
+    id: Uuid,
+    kind: OperationKind,
+    total_issued: Amount,
+    total_redeemed: Amount,
+    fee_collected: Amount,
+    complete_at: Option<u64>,
+    /// Payment amount (only for melt operations)
+    payment_amount: Option<Amount>,
+    /// Payment fee (only for melt operations)
+    payment_fee: Option<Amount>,
+    /// Payment method (only for mint/melt operations)
+    payment_method: Option<PaymentMethod>,
 }
 
 impl Operation {
+    /// New
+    pub fn new(
+        id: Uuid,
+        kind: OperationKind,
+        total_issued: Amount,
+        total_redeemed: Amount,
+        fee_collected: Amount,
+        complete_at: Option<u64>,
+        payment_method: Option<PaymentMethod>,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            total_issued,
+            total_redeemed,
+            fee_collected,
+            complete_at,
+            payment_amount: None,
+            payment_fee: None,
+            payment_method,
+        }
+    }
+
     /// Mint
-    pub fn new_mint() -> Self {
-        Self::Mint(Uuid::new_v4())
+    pub fn new_mint(total_issued: Amount, payment_method: PaymentMethod) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            kind: OperationKind::Mint,
+            total_issued,
+            total_redeemed: Amount::ZERO,
+            fee_collected: Amount::ZERO,
+            complete_at: None,
+            payment_amount: None,
+            payment_fee: None,
+            payment_method: Some(payment_method),
+        }
     }
     /// Melt
-    pub fn new_melt() -> Self {
-        Self::Melt(Uuid::new_v4())
+    ///
+    /// In the context of a melt total_issued refrests to the change
+    pub fn new_melt(
+        total_redeemed: Amount,
+        fee_collected: Amount,
+        payment_method: PaymentMethod,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            kind: OperationKind::Melt,
+            total_issued: Amount::ZERO,
+            total_redeemed,
+            fee_collected,
+            complete_at: None,
+            payment_amount: None,
+            payment_fee: None,
+            payment_method: Some(payment_method),
+        }
     }
+
     /// Swap
-    pub fn new_swap() -> Self {
-        Self::Swap(Uuid::new_v4())
+    pub fn new_swap(total_issued: Amount, total_redeemed: Amount, fee_collected: Amount) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            kind: OperationKind::Swap,
+            total_issued,
+            total_redeemed,
+            fee_collected,
+            complete_at: None,
+            payment_amount: None,
+            payment_fee: None,
+            payment_method: None,
+        }
     }
 
     /// Operation id
     pub fn id(&self) -> &Uuid {
-        match self {
-            Operation::Mint(id) => id,
-            Operation::Melt(id) => id,
-            Operation::Swap(id) => id,
-        }
+        &self.id
     }
 
     /// Operation kind
-    pub fn kind(&self) -> &str {
-        match self {
-            Operation::Mint(_) => "mint",
-            Operation::Melt(_) => "melt",
-            Operation::Swap(_) => "swap",
-        }
+    pub fn kind(&self) -> OperationKind {
+        self.kind
     }
 
-    /// From kind and i
-    pub fn from_kind_and_id(kind: &str, id: &str) -> Result<Self, Error> {
-        let uuid = Uuid::parse_str(id)?;
-        match kind {
-            "mint" => Ok(Self::Mint(uuid)),
-            "melt" => Ok(Self::Melt(uuid)),
-            "swap" => Ok(Self::Swap(uuid)),
-            _ => Err(Error::Custom(format!("Invalid operation kind: {}", kind))),
-        }
+    /// Total issued
+    pub fn total_issued(&self) -> Amount {
+        self.total_issued
     }
+
+    /// Total redeemed
+    pub fn total_redeemed(&self) -> Amount {
+        self.total_redeemed
+    }
+
+    /// Fee collected
+    pub fn fee_collected(&self) -> Amount {
+        self.fee_collected
+    }
+
+    /// Completed time
+    pub fn completed_at(&self) -> &Option<u64> {
+        &self.complete_at
+    }
+
+    /// Add change
+    pub fn add_change(&mut self, change: Amount) {
+        self.total_issued = change;
+    }
+
+    /// Payment amount (only for melt operations)
+    pub fn payment_amount(&self) -> Option<Amount> {
+        self.payment_amount
+    }
+
+    /// Payment fee (only for melt operations)
+    pub fn payment_fee(&self) -> Option<Amount> {
+        self.payment_fee
+    }
+
+    /// Set payment details for melt operations
+    pub fn set_payment_details(&mut self, payment_amount: Amount, payment_fee: Amount) {
+        self.payment_amount = Some(payment_amount);
+        self.payment_fee = Some(payment_fee);
+    }
+
+    /// Payment method (only for mint/melt operations)
+    pub fn payment_method(&self) -> Option<PaymentMethod> {
+        self.payment_method.clone()
+    }
+}
+
+/// Tracks pending changes made to a [`MintQuote`] that need to be persisted.
+///
+/// This struct implements a change-tracking pattern that separates domain logic from
+/// persistence concerns. When modifications are made to a `MintQuote` via methods like
+/// [`MintQuote::add_payment`] or [`MintQuote::add_issuance`], the changes are recorded
+/// here rather than being immediately persisted. The database layer can then call
+/// [`MintQuote::take_changes`] to retrieve and persist only the modifications.
+///
+/// This approach allows business rule validation to happen in the domain model while
+/// keeping the database layer focused purely on persistence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct MintQuoteChange {
+    /// New payments added since the quote was loaded or last persisted.
+    pub payments: Option<Vec<IncomingPayment>>,
+    /// New issuance amounts recorded since the quote was loaded or last persisted.
+    pub issuances: Option<Vec<Amount>>,
 }
 
 /// Mint Quote Info
@@ -319,6 +411,13 @@ pub struct MintQuote {
     /// Payment of payment(s) that filled quote
     #[serde(default)]
     pub issuance: Vec<Issuance>,
+    /// Accumulated changes since this quote was loaded or created.
+    ///
+    /// This field is not serialized and is used internally to track modifications
+    /// that need to be persisted. Use [`Self::take_changes`] to extract pending
+    /// changes for persistence.
+    #[serde(skip)]
+    changes: Option<MintQuoteChange>,
 }
 
 impl MintQuote {
@@ -355,20 +454,8 @@ impl MintQuote {
             payment_method,
             payments,
             issuance,
+            changes: None,
         }
-    }
-
-    /// Increment the amount paid on the mint quote by a given amount
-    #[instrument(skip(self))]
-    pub fn increment_amount_paid(
-        &mut self,
-        additional_amount: Amount,
-    ) -> Result<Amount, crate::Error> {
-        self.amount_paid = self
-            .amount_paid
-            .checked_add(additional_amount)
-            .ok_or(crate::Error::AmountOverflow)?;
-        Ok(self.amount_paid)
     }
 
     /// Amount paid
@@ -377,16 +464,48 @@ impl MintQuote {
         self.amount_paid
     }
 
-    /// Increment the amount issued on the mint quote by a given amount
+    /// Records tokens being issued against this mint quote.
+    ///
+    /// This method validates that the issuance doesn't exceed the amount paid, updates
+    /// the quote's internal state, and records the change for later persistence. The
+    /// `amount_issued` counter is incremented and the issuance is added to the change
+    /// tracker for the database layer to persist.
+    ///
+    /// # Arguments
+    ///
+    /// * `additional_amount` - The amount of tokens being issued.
+    ///
+    /// # Returns
+    ///
+    /// Returns the new total `amount_issued` after this issuance is recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::Error::OverIssue`] if the new issued amount would exceed the
+    /// amount paid (cannot issue more tokens than have been paid for).
+    ///
+    /// Returns [`crate::Error::AmountOverflow`] if adding the issuance amount would
+    /// cause an arithmetic overflow.
     #[instrument(skip(self))]
-    pub fn increment_amount_issued(
-        &mut self,
-        additional_amount: Amount,
-    ) -> Result<Amount, crate::Error> {
-        self.amount_issued = self
+    pub fn add_issuance(&mut self, additional_amount: Amount) -> Result<Amount, crate::Error> {
+        let new_amount_issued = self
             .amount_issued
             .checked_add(additional_amount)
             .ok_or(crate::Error::AmountOverflow)?;
+
+        // Can't issue more than what's been paid
+        if new_amount_issued > self.amount_paid {
+            return Err(crate::Error::OverIssue);
+        }
+
+        self.changes
+            .get_or_insert_default()
+            .issuances
+            .get_or_insert_default()
+            .push(additional_amount);
+
+        self.amount_issued = new_amount_issued;
+
         Ok(self.amount_issued)
     }
 
@@ -417,16 +536,47 @@ impl MintQuote {
         self.amount_paid - self.amount_issued
     }
 
-    /// Add a payment ID to the list of payment IDs
+    /// Extracts and returns all pending changes, leaving the internal change tracker empty.
     ///
-    /// Returns an error if the payment ID is already in the list
+    /// This method is typically called by the database layer after loading or modifying a quote. It
+    /// returns any accumulated changes (new payments, issuances) that need to be persisted, and
+    /// clears the internal change buffer so that subsequent calls return `None` until new
+    /// modifications are made.
+    ///
+    /// Returns `None` if no changes have been made since the last call to this method or since the
+    /// quote was created/loaded.
+    pub fn take_changes(&mut self) -> Option<MintQuoteChange> {
+        self.changes.take()
+    }
+
+    /// Records a new payment received for this mint quote.
+    ///
+    /// This method validates the payment, updates the quote's internal state, and records the
+    /// change for later persistence. The `amount_paid` counter is incremented and the payment is
+    /// added to the change tracker for the database layer to persist.
+    ///
+    /// # Arguments
+    ///
+    /// * `amount` - The amount of the payment in the quote's currency unit. * `payment_id` - A
+    /// unique identifier for this payment (e.g., lightning payment hash). * `time` - Optional Unix
+    /// timestamp of when the payment was received. If `None`, the current time is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::Error::DuplicatePaymentId`] if a payment with the same ID has already been
+    /// recorded for this quote.
+    ///
+    /// Returns [`crate::Error::AmountOverflow`] if adding the payment amount would cause an
+    /// arithmetic overflow.
     #[instrument(skip(self))]
     pub fn add_payment(
         &mut self,
         amount: Amount,
         payment_id: String,
-        time: u64,
+        time: Option<u64>,
     ) -> Result<(), crate::Error> {
+        let time = time.unwrap_or_else(unix_time);
+
         let payment_ids = self.payment_ids();
         if payment_ids.contains(&&payment_id) {
             return Err(crate::Error::DuplicatePaymentId);
@@ -434,7 +584,19 @@ impl MintQuote {
 
         let payment = IncomingPayment::new(amount, payment_id, time);
 
-        self.payments.push(payment);
+        self.payments.push(payment.clone());
+
+        self.changes
+            .get_or_insert_default()
+            .payments
+            .get_or_insert_default()
+            .push(payment);
+
+        self.amount_paid = self
+            .amount_paid
+            .checked_add(amount)
+            .ok_or(crate::Error::AmountOverflow)?;
+
         Ok(())
     }
 
@@ -589,8 +751,6 @@ pub struct MintKeySetInfo {
     pub derivation_path: DerivationPath,
     /// DerivationPath index of Keyset
     pub derivation_path_index: Option<u32>,
-    /// Max order of keyset
-    pub max_order: u8,
     /// Supported amounts
     pub amounts: Vec<u64>,
     /// Input Fee ppk
@@ -673,7 +833,6 @@ impl From<&MeltQuote> for MeltQuoteBolt11Response<QuoteId> {
             payment_preimage: None,
             change: None,
             state: melt_quote.state,
-            paid: Some(melt_quote.state == MeltQuoteState::Paid),
             expiry: melt_quote.expiry,
             amount: melt_quote.amount,
             fee_reserve: melt_quote.fee_reserve,
@@ -685,12 +844,10 @@ impl From<&MeltQuote> for MeltQuoteBolt11Response<QuoteId> {
 
 impl From<MeltQuote> for MeltQuoteBolt11Response<QuoteId> {
     fn from(melt_quote: MeltQuote) -> MeltQuoteBolt11Response<QuoteId> {
-        let paid = melt_quote.state == MeltQuoteState::Paid;
         MeltQuoteBolt11Response {
             quote: melt_quote.id.clone(),
             amount: melt_quote.amount,
             fee_reserve: melt_quote.fee_reserve,
-            paid: Some(paid),
             state: melt_quote.state,
             expiry: melt_quote.expiry,
             payment_preimage: melt_quote.payment_preimage,

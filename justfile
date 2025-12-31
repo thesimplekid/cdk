@@ -59,7 +59,7 @@ test:
   if [ ! -f Cargo.toml ]; then
     cd {{invocation_directory()}}
   fi
-  cargo test --lib
+  cargo test --lib --workspace --exclude cdk-postgres
 
   # Run pure integration tests
   cargo test -p cdk-integration-tests --test mint 
@@ -83,14 +83,93 @@ test-all db="memory":
     #!/usr/bin/env bash
     set -euo pipefail
     just test {{db}}
-    ./misc/itests.sh "{{db}}"
-    ./misc/fake_itests.sh "{{db}}" external_signatory
-    ./misc/fake_itests.sh "{{db}}"
+    bash ./misc/itests.sh "{{db}}"
+    bash ./misc/fake_itests.sh "{{db}}" external_signatory
+    bash ./misc/fake_itests.sh "{{db}}"
     
+# Mutation Testing Commands
+
+# Run mutation tests on a specific crate
+# Usage: just mutants <crate-name>
+# Example: just mutants cashu
+mutants CRATE:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running mutation tests on crate: {{CRATE}}"
+  cargo mutants --package {{CRATE}} -vV
+
+# Run mutation tests on the cashu crate
+mutants-cashu:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running mutation tests on cashu crate..."
+  cargo mutants --package cashu -vV
+
+# Run mutation tests on the cdk crate
+mutants-cdk:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running mutation tests on cdk crate..."
+  cargo mutants --package cdk -vV
+
+# Run mutation tests on entire workspace (WARNING: very slow)
+mutants-all:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running mutation tests on entire workspace..."
+  echo "WARNING: This may take a very long time!"
+  cargo mutants -vV
+
+# Quick mutation test for current work (alias for mutants-diff)
+mutants-quick:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running mutations on changed files since HEAD..."
+  cargo mutants --in-diff HEAD -vV
+
+# Run mutation tests only on changed code since HEAD
+mutants-diff:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Running mutation tests on changed code..."
+  cargo mutants --in-diff HEAD -vV
+
+# Run mutation tests and save output to log file
+# Usage: just mutants-log <crate-name> <log-suffix>
+# Example: just mutants-log cashu baseline
+mutants-log CRATE SUFFIX:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ ! -f Cargo.toml ]; then
+    cd {{invocation_directory()}}
+  fi
+  LOG_FILE="mutants-{{CRATE}}-{{SUFFIX}}.log"
+  echo "Running mutation tests on {{CRATE}}, saving to $LOG_FILE..."
+  cargo mutants --package {{CRATE}} -vV 2>&1 | tee "$LOG_FILE"
+  echo "Results saved to $LOG_FILE"
+
+# Mutation test with baseline comparison
+# Usage: just mutants-check <crate-name>
+# Example: just mutants-check cashu
+mutants-check CRATE:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  BASELINE="mutants-{{CRATE}}-baseline.log"
+  if [ ! -f "$BASELINE" ]; then
+    echo "ERROR: No baseline found at $BASELINE"
+    echo "Run: just mutants-log {{CRATE}} baseline"
+    exit 1
+  fi
+  cargo mutants --package {{CRATE}} -vV | tee mutants-{{CRATE}}-current.log
+  # Compare results
+  echo "=== Baseline vs Current ==="
+  diff <(grep "^CAUGHT\|^MISSED" "$BASELINE" | wc -l) \
+       <(grep "^CAUGHT\|^MISSED" mutants-{{CRATE}}-current.log | wc -l) || true
+
 test-nutshell:
   #!/usr/bin/env bash
   set -euo pipefail
-  
+
   # Function to cleanup docker containers
   cleanup() {
     echo "Cleaning up docker containers..."
@@ -101,8 +180,12 @@ test-nutshell:
   
   # Trap to ensure cleanup happens on exit (success or failure)
   trap cleanup EXIT
-  
-  docker run -d -p 3338:3338 --name nutshell -e MINT_LIGHTNING_BACKEND=FakeWallet -e MINT_LISTEN_HOST=0.0.0.0 -e MINT_LISTEN_PORT=3338 -e MINT_PRIVATE_KEY=TEST_PRIVATE_KEY -e MINT_INPUT_FEE_PPK=100  cashubtc/nutshell:latest poetry run mint
+
+  # Clean up any leftover containers from previous runs
+  docker stop nutshell 2>/dev/null || true
+  docker rm nutshell 2>/dev/null || true
+
+  docker run -d --network=host --name nutshell -e MINT_LIGHTNING_BACKEND=FakeWallet -e MINT_LISTEN_HOST=0.0.0.0 -e MINT_LISTEN_PORT=3338 -e MINT_PRIVATE_KEY=TEST_PRIVATE_KEY -e MINT_INPUT_FEE_PPK=100  cashubtc/nutshell:latest poetry run mint
   
   export CDK_ITESTS_DIR=$(mktemp -d)
 
@@ -114,9 +197,18 @@ test-nutshell:
     attempt=$((attempt+1))
     if [ $attempt -ge $max_attempts ]; then
       echo "Nutshell failed to start after $max_attempts attempts"
+      echo "=== Docker container status ==="
+      docker ps -a --filter name=nutshell
+      echo "=== Docker logs ==="
+      docker logs nutshell 2>&1 || true
       exit 1
     fi
     echo "Waiting for Nutshell to start (attempt $attempt/$max_attempts)..."
+    # Show container status every 10 attempts
+    if [ $((attempt % 10)) -eq 0 ]; then
+      echo "=== Container status check ==="
+      docker ps -a --filter name=nutshell
+    fi
     sleep 1
   done
   echo "Nutshell is ready!"
@@ -155,20 +247,35 @@ test-nutshell:
     
 
 # run `cargo clippy` on everything
-clippy *ARGS="--locked --offline --workspace --all-targets":
-  cargo clippy {{ARGS}}
+clippy *ARGS="--workspace --all-targets":
+  cargo clippy {{ARGS}} -- -D warnings
 
 # run `cargo clippy --fix` on everything
-clippy-fix *ARGS="--locked --offline --workspace --all-targets":
+clippy-fix *ARGS="--workspace --all-targets":
   cargo clippy {{ARGS}} --fix
 
-typos: 
+typos:
   typos
 
 # fix all typos
 [no-exit-message]
 typos-fix:
   just typos -w
+
+# run all linting checks (format check, typos, nix format)
+lint:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ ! -f Cargo.toml ]; then
+    cd {{invocation_directory()}}
+  fi
+  echo "Checking Rust formatting..."
+  cargo fmt --all -- --check
+  echo "Checking Nix formatting..."
+  nixpkgs-fmt --check $(echo **.nix)
+  echo "Checking for typos..."
+  typos
+  echo "All checks passed!"
 
 # Goose AI Recipe Commands
 
@@ -194,34 +301,34 @@ goose-changelog-commits *COMMITS="5":
 itest db:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/itests.sh "{{db}}"
+  bash ./misc/itests.sh "{{db}}"
 
 fake-mint-itest db:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/fake_itests.sh "{{db}}"
-  ./misc/fake_itests.sh "{{db}}" external_signatory
+  bash ./misc/fake_itests.sh "{{db}}"
+  bash ./misc/fake_itests.sh "{{db}}" external_signatory
 
 itest-payment-processor ln:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/mintd_payment_processor.sh "{{ln}}"
+  bash ./misc/mintd_payment_processor.sh "{{ln}}"
 
 fake-auth-mint-itest db openid_discovery:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/fake_auth_itests.sh "{{db}}" "{{openid_discovery}}"
+  bash ./misc/fake_auth_itests.sh "{{db}}" "{{openid_discovery}}"
 
 nutshell-wallet-itest:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/nutshell_wallet_itest.sh
+  bash ./misc/nutshell_wallet_itest.sh
 
 # Start interactive regtest environment (Bitcoin + 4 LN nodes + 2 CDK mints)
 regtest db="sqlite":
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/interactive_regtest_mprocs.sh {{db}}
+  bash ./misc/interactive_regtest_mprocs.sh {{db}}
 
 # Lightning Network Commands (require regtest environment to be running)
 
@@ -229,67 +336,67 @@ regtest db="sqlite":
 ln-cln1 *ARGS:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh ln-cln1 {{ARGS}}
+  bash ./misc/regtest_helper.sh ln-cln1 {{ARGS}}
 
 # Get CLN node 2 info  
 ln-cln2 *ARGS:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh ln-cln2 {{ARGS}}
+  bash ./misc/regtest_helper.sh ln-cln2 {{ARGS}}
 
 # Get LND node 1 info
 ln-lnd1 *ARGS:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh ln-lnd1 {{ARGS}}
+  bash ./misc/regtest_helper.sh ln-lnd1 {{ARGS}}
 
 # Get LND node 2 info
 ln-lnd2 *ARGS:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh ln-lnd2 {{ARGS}}
+  bash ./misc/regtest_helper.sh ln-lnd2 {{ARGS}}
 
 # Bitcoin regtest commands
 btc *ARGS:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh btc {{ARGS}}
+  bash ./misc/regtest_helper.sh btc {{ARGS}}
 
 # Mine blocks in regtest
 btc-mine blocks="10":
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh btc-mine {{blocks}}
+  bash ./misc/regtest_helper.sh btc-mine {{blocks}}
 
 # Show mint information
 mint-info:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh mint-info
+  bash ./misc/regtest_helper.sh mint-info
 
 # Run integration tests against regtest environment
 mint-test:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh mint-test
+  bash ./misc/regtest_helper.sh mint-test
 
 # Restart mints after recompiling (useful for development)
 restart-mints:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh restart-mints
+  bash ./misc/regtest_helper.sh restart-mints
 
 # Show regtest environment status
 regtest-status:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh show-status
+  bash ./misc/regtest_helper.sh show-status
 
 # Show regtest environment logs
 regtest-logs:
   #!/usr/bin/env bash
   set -euo pipefail
-  ./misc/regtest_helper.sh show-logs
+  bash ./misc/regtest_helper.sh show-logs
 
 run-examples:
   cargo r --example p2pk
@@ -332,6 +439,7 @@ release m="":
     "-p cdk-postgres"
     "-p cdk-redb"
     "-p cdk-signatory"
+    "-p cdk-fake-wallet"
     "-p cdk"
     "-p cdk-ffi"
     "-p cdk-axum"
@@ -340,7 +448,6 @@ release m="":
     "-p cdk-lnd"
     "-p cdk-lnbits"
     "-p cdk-ldk-node"
-    "-p cdk-fake-wallet"
     "-p cdk-payment-processor"
     "-p cdk-cli"
     "-p cdk-mintd"
@@ -497,6 +604,15 @@ ffi-generate-all *ARGS="--release": ffi-build
   just ffi-generate swift {{ARGS}}
   just ffi-generate kotlin {{ARGS}}
   @echo "✅ All bindings generated successfully!"
+
+# Run Python FFI tests
+ffi-test: ffi-generate-python
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "🧪 Running Python FFI tests..."
+  python3 crates/cdk-ffi/tests/test_transactions.py
+  python3 crates/cdk-ffi/tests/test_kvstore.py
+  echo "✅ Tests completed!"
 
 # Build debug version and generate Python bindings quickly (for development)
 ffi-dev-python:

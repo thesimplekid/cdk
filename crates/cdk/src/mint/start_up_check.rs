@@ -5,6 +5,7 @@
 
 use std::str::FromStr;
 
+use cdk_common::database::Error as DatabaseError;
 use cdk_common::mint::OperationKind;
 use cdk_common::QuoteId;
 
@@ -125,13 +126,25 @@ impl Mint {
                 saga.updated_at
             );
 
+            // Look up input_ys and blinded_secrets from the proof and blind_signature tables
+            let input_ys = self
+                .localstore
+                .get_proof_ys_by_operation_id(&saga.operation_id)
+                .await?;
+            let blinded_secrets = self
+                .localstore
+                .get_blinded_secrets_by_operation_id(&saga.operation_id)
+                .await?;
+
             // Use the same compensation logic as in-process failures
+            // Saga deletion is included in the compensation transaction
             let compensation = RemoveSwapSetup {
-                blinded_secrets: saga.blinded_secrets.clone(),
-                input_ys: saga.input_ys.clone(),
+                blinded_secrets,
+                input_ys,
+                operation_id: saga.operation_id,
             };
 
-            // Execute compensation
+            // Execute compensation (includes saga deletion)
             if let Err(e) = compensation.execute(&self.localstore).await {
                 tracing::error!(
                     "Failed to compensate saga {}: {}. Continuing...",
@@ -140,15 +153,6 @@ impl Mint {
                 );
                 continue;
             }
-
-            // Delete saga after successful compensation
-            let mut tx = self.localstore.begin_transaction().await?;
-            if let Err(e) = tx.delete_saga(&saga.operation_id).await {
-                tracing::error!("Failed to delete saga for {}: {}", saga.operation_id, e);
-                tx.rollback().await?;
-                continue;
-            }
-            tx.commit().await?;
 
             tracing::info!("Successfully recovered saga {}", saga.operation_id);
         }
@@ -206,6 +210,16 @@ impl Mint {
                 saga.updated_at
             );
 
+            // Look up input_ys and blinded_secrets from the proof and blind_signature tables
+            let input_ys = self
+                .localstore
+                .get_proof_ys_by_operation_id(&saga.operation_id)
+                .await?;
+            let blinded_secrets = self
+                .localstore
+                .get_blinded_secrets_by_operation_id(&saga.operation_id)
+                .await?;
+
             // Get quote_id from saga (new field added for efficient lookup)
             let quote_id = match saga.quote_id {
                 Some(ref qid) => qid.clone(),
@@ -230,13 +244,13 @@ impl Mint {
 
                     let mut quote_id_found = None;
                     for quote in melt_quotes {
-                        let tx = self.localstore.begin_transaction().await?;
+                        let mut tx = self.localstore.begin_transaction().await?;
                         let proof_ys = tx.get_proof_ys_by_quote_id(&quote.id).await?;
                         tx.rollback().await?;
 
-                        if !saga.input_ys.is_empty()
+                        if !input_ys.is_empty()
                             && !proof_ys.is_empty()
-                            && saga.input_ys.iter().any(|y| proof_ys.contains(y))
+                            && input_ys.iter().any(|y| proof_ys.contains(y))
                         {
                             quote_id_found = Some(quote.id.clone());
                             break;
@@ -315,22 +329,103 @@ impl Mint {
                 }
             };
 
-            // Check saga state to determine if payment was sent
-            // SetupComplete means setup transaction committed but payment NOT yet sent
+            // Check saga state to determine if payment was attempted
+            // SetupComplete means setup transaction committed but payment NOT yet attempted
+            // PaymentAttempted means payment was attempted - must check LN backend
             let should_compensate = match &saga.state {
                 cdk_common::mint::SagaStateEnum::Melt(state) => {
                     match state {
                         cdk_common::mint::MeltSagaState::SetupComplete => {
-                            // Setup complete but payment never sent - always compensate
+                            // Setup complete but payment never attempted - always compensate
                             tracing::info!(
-                                "Saga {} in SetupComplete state - payment never sent, will compensate",
+                                "Saga {} in SetupComplete state - payment never attempted, will compensate",
                                 saga.operation_id
                             );
                             true
                         }
-                        _ => {
-                            // Other states - should not happen in incomplete sagas, but check payment status anyway
-                            false // Will check payment status below
+                        cdk_common::mint::MeltSagaState::PaymentAttempted => {
+                            // Payment was attempted - check for internal settlement first, then LN backend
+                            tracing::info!(
+                                "Saga {} in PaymentAttempted state - checking for internal or external payment",
+                                saga.operation_id
+                            );
+
+                            // Check if this was an internal settlement by looking for a mint quote
+                            // that was paid by this melt quote
+                            let is_internal_settlement = match self
+                                .localstore
+                                .get_mint_quote_by_request(&quote.request.to_string())
+                                .await
+                            {
+                                Ok(Some(mint_quote)) => {
+                                    // Check if this mint quote was paid by our melt quote
+                                    let melt_quote_id_str = quote.id.to_string();
+                                    mint_quote.payment_ids().contains(&&melt_quote_id_str)
+                                }
+                                Ok(None) => false,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Error checking for internal settlement for saga {}: {}",
+                                        saga.operation_id,
+                                        e
+                                    );
+                                    false
+                                }
+                            };
+
+                            if is_internal_settlement {
+                                // Internal settlement was completed - finalize directly
+                                tracing::info!(
+                                    "Saga {} was internal settlement - will finalize directly",
+                                    saga.operation_id
+                                );
+
+                                // Get payment info for finalization
+                                let total_spent = quote.amount;
+                                let payment_lookup_id =
+                                    quote.request_lookup_id.clone().unwrap_or_else(|| {
+                                        cdk_common::payment::PaymentIdentifier::CustomId(
+                                            quote.id.to_string(),
+                                        )
+                                    });
+
+                                if let Err(err) = self
+                                    .finalize_paid_melt_quote(
+                                        &quote,
+                                        total_spent,
+                                        None, // No preimage for internal settlement
+                                        &payment_lookup_id,
+                                    )
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Failed to finalize internal settlement saga {}: {}",
+                                        saga.operation_id,
+                                        err
+                                    );
+                                }
+
+                                // Delete saga after successful finalization
+                                let mut tx = self.localstore.begin_transaction().await?;
+                                if let Err(e) = tx.delete_saga(&saga.operation_id).await {
+                                    tracing::error!(
+                                        "Failed to delete saga for {}: {}",
+                                        saga.operation_id,
+                                        e
+                                    );
+                                    tx.rollback().await?;
+                                } else {
+                                    tx.commit().await?;
+                                    tracing::info!(
+                                        "Successfully recovered and finalized internal settlement saga {}",
+                                        saga.operation_id
+                                    );
+                                }
+
+                                continue; // Skip to next saga
+                            }
+
+                            false // Will check LN payment status below
                         }
                     }
                 }
@@ -440,20 +535,18 @@ impl Mint {
 
             // Compensate if needed
             if should_compensate {
-                // Use saga data directly for compensation (like swap does)
                 tracing::info!(
                     "Compensating melt saga {} (removing {} proofs, {} change outputs)",
                     saga.operation_id,
-                    saga.input_ys.len(),
-                    saga.blinded_secrets.len()
+                    input_ys.len(),
+                    blinded_secrets.len()
                 );
 
-                // Compensate using saga data only - don't rely on quote state
                 let mut tx = self.localstore.begin_transaction().await?;
 
                 // Remove blinded messages (change outputs)
-                if !saga.blinded_secrets.is_empty() {
-                    if let Err(e) = tx.delete_blinded_messages(&saga.blinded_secrets).await {
+                if !blinded_secrets.is_empty() {
+                    if let Err(e) = tx.delete_blinded_messages(&blinded_secrets).await {
                         tracing::error!(
                             "Failed to delete blinded messages for saga {}: {}",
                             saga.operation_id,
@@ -464,22 +557,63 @@ impl Mint {
                     }
                 }
 
-                // Remove proofs (inputs) - use None for quote_id like swap does
-                if !saga.input_ys.is_empty() {
-                    if let Err(e) = tx.remove_proofs(&saga.input_ys, None).await {
+                // Remove proofs (inputs)
+                if !input_ys.is_empty() {
+                    match tx.remove_proofs(&input_ys, None).await {
+                        Ok(()) => {}
+                        Err(DatabaseError::AttemptRemoveSpentProof) => {
+                            // Proofs are already spent or missing - this is okay for compensation.
+                            // The goal is to make proofs unusable, and they already are.
+                            // Continue with saga deletion to avoid infinite recovery loop.
+                            tracing::warn!(
+                                "Saga {} compensation: proofs already spent or missing, proceeding with saga cleanup",
+                                saga.operation_id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to remove proofs for saga {}: {}",
+                                saga.operation_id,
+                                e
+                            );
+                            tx.rollback().await?;
+                            continue;
+                        }
+                    }
+                }
+
+                // Reset quote state to Unpaid (melt-specific, unlike swap)
+                // Acquire lock on the quote first
+                let mut locked_quote = match tx.get_melt_quote(&quote_id_parsed).await {
+                    Ok(Some(q)) => q,
+                    Ok(None) => {
+                        tracing::warn!(
+                            "Melt quote {} not found for saga {} - may have been cleaned up",
+                            quote_id_parsed,
+                            saga.operation_id
+                        );
+                        // Continue with saga deletion even if quote is gone
+                        if let Err(e) = tx.delete_saga(&saga.operation_id).await {
+                            tracing::error!("Failed to delete saga {}: {}", saga.operation_id, e);
+                            tx.rollback().await?;
+                            continue;
+                        }
+                        tx.commit().await?;
+                        continue;
+                    }
+                    Err(e) => {
                         tracing::error!(
-                            "Failed to remove proofs for saga {}: {}",
+                            "Failed to get quote for saga {}: {}",
                             saga.operation_id,
                             e
                         );
                         tx.rollback().await?;
                         continue;
                     }
-                }
+                };
 
-                // Reset quote state to Unpaid (melt-specific, unlike swap)
                 if let Err(e) = tx
-                    .update_melt_quote_state(&quote_id_parsed, MeltQuoteState::Unpaid, None)
+                    .update_melt_quote_state(&mut locked_quote, MeltQuoteState::Unpaid, None)
                     .await
                 {
                     tracing::error!(

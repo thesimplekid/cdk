@@ -138,6 +138,18 @@ required-features = ["wallet"]
 name = "mint-token-bolt12"
 required-features = ["wallet"]
 
+[[example]]
+name = "human_readable_payment"
+required-features = ["wallet", "bip353"]
+
+[[example]]
+name = "payment_request"
+required-features = ["wallet", "nostr"]
+
+[[example]]
+name = "token-proofs"
+required-features = ["wallet"]
+
 [dev-dependencies]
 rand.workspace = true
 cdk-sqlite.workspace = true
@@ -154,3 +166,6 @@ tokio = { workspace = true, features = ["full"] }
 [[bench]]
 name = "dhke_benchmarks"
 harness = false
+
+[lints]
+workspace = true

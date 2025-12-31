@@ -88,11 +88,11 @@ where
         INSERT INTO
             keyset (
                 id, unit, active, valid_from, valid_to, derivation_path,
-                max_order, derivation_path_index
+                amounts, input_fee_ppk, derivation_path_index
             )
         VALUES (
             :id, :unit, :active, :valid_from, :valid_to, :derivation_path,
-            :max_order, :derivation_path_index
+            :amounts, :input_fee_ppk, :derivation_path_index
         )
         ON CONFLICT(id) DO UPDATE SET
             unit = excluded.unit,
@@ -100,7 +100,8 @@ where
             valid_from = excluded.valid_from,
             valid_to = excluded.valid_to,
             derivation_path = excluded.derivation_path,
-            max_order = excluded.max_order,
+            amounts = excluded.amounts,
+            input_fee_ppk = excluded.input_fee_ppk,
             derivation_path_index = excluded.derivation_path_index
         "#,
         )?
@@ -110,7 +111,8 @@ where
         .bind("valid_from", keyset.valid_from as i64)
         .bind("valid_to", keyset.final_expiry.map(|v| v as i64))
         .bind("derivation_path", keyset.derivation_path.to_string())
-        .bind("max_order", keyset.max_order)
+        .bind("amounts", serde_json::to_string(&keyset.amounts).ok())
+        .bind("input_fee_ppk", keyset.input_fee_ppk as i64)
         .bind("derivation_path_index", keyset.derivation_path_index)
         .execute(&self.inner)
         .await?;
@@ -119,6 +121,7 @@ where
     }
 
     async fn add_proof(&mut self, proof: AuthProof) -> Result<(), database::Error> {
+        let y = proof.y()?;
         if let Err(err) = query(
             r#"
                 INSERT INTO proof
@@ -127,7 +130,7 @@ where
                 (:y, :keyset_id, :secret, :c, :state)
                 "#,
         )?
-        .bind("y", proof.y()?.to_bytes().to_vec())
+        .bind("y", y.to_bytes().to_vec())
         .bind("keyset_id", proof.keyset_id.to_string())
         .bind("secret", proof.secret.to_string())
         .bind("c", proof.c.to_bytes().to_vec())
@@ -152,12 +155,8 @@ where
             .map(|state| Ok::<_, Error>(column_as_string!(state, State::from_str)))
             .transpose()?;
 
-        query(r#"UPDATE proof SET state = :new_state WHERE state = :state AND y = :y"#)?
+        query(r#"UPDATE proof SET state = :new_state WHERE  y = :y"#)?
             .bind("y", y.to_bytes().to_vec())
-            .bind(
-                "state",
-                current_state.as_ref().map(|state| state.to_string()),
-            )
             .bind("new_state", proofs_state.to_string())
             .execute(&self.inner)
             .await?;
@@ -286,7 +285,6 @@ where
                 valid_to,
                 derivation_path,
                 derivation_path_index,
-                max_order,
                 amounts,
                 input_fee_ppk
             FROM
@@ -311,7 +309,6 @@ where
                 valid_to,
                 derivation_path,
                 derivation_path_index,
-                max_order,
                 amounts,
                 input_fee_ppk
             FROM
