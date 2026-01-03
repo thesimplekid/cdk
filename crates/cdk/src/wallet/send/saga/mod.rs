@@ -30,7 +30,7 @@ use cdk_common::wallet::{
 use cdk_common::Id;
 use tracing::instrument;
 
-use self::compensation::RevertProofReservation;
+use self::compensation::{RevertProofReservation, RevertSwappedProofs};
 use self::state::{Confirmed, Initial, Prepared};
 use super::{split_proofs_for_send, SendMemo, SendOptions};
 use crate::amount::SplitTarget;
@@ -457,6 +457,21 @@ impl SendSaga<Prepared> {
                 )
                 .await?
             {
+                // Track swapped proofs for compensation if send fails later.
+                // The nested swap saga has completed and deleted its own tracking,
+                // so we must register compensation for these new proofs.
+                let swapped_ys = proofs.ys()?;
+
+                // Register compensation to revert swapped proofs on failure
+                add_compensation(
+                    &self.compensations,
+                    Box::new(RevertSwappedProofs {
+                        localstore: self.wallet.localstore.clone(),
+                        proof_ys: swapped_ys,
+                    }),
+                )
+                .await;
+
                 proofs_to_send.extend(proofs);
             }
         }
