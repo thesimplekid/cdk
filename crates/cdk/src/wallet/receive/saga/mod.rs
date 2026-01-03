@@ -235,16 +235,21 @@ impl ReceiveSaga<Validated> {
 
         let fee_breakdown = self.wallet.get_proofs_fee(&proofs).await?;
 
-        // Store proofs in Pending state
+        let operation_id = self.state_data.operation_id;
+        let operation_id_str = operation_id.to_string();
+
+        // Store proofs in Pending state with operation ID for recovery tracking
         let proofs_info = proofs
             .clone()
             .into_iter()
             .map(|p| {
-                ProofInfo::new(
+                ProofInfo::new_with_operations(
                     p,
                     self.wallet.mint_url.clone(),
                     State::Pending,
                     self.wallet.unit.clone(),
+                    Some(operation_id_str.clone()),
+                    None,
                 )
             })
             .collect::<Result<Vec<ProofInfo>, _>>()?;
@@ -253,8 +258,6 @@ impl ReceiveSaga<Validated> {
             .localstore
             .update_proofs(proofs_info.clone(), vec![])
             .await?;
-
-        let operation_id = self.state_data.operation_id;
 
         // Persist saga state for crash recovery
         let saga = WalletSaga::new(

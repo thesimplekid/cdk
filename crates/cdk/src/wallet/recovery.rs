@@ -615,16 +615,8 @@ impl Wallet {
                     saga_id
                 );
 
-                // Get the pending proofs for this operation
-                let pending_proofs = self
-                    .localstore
-                    .get_proofs(
-                        Some(self.mint_url.clone()),
-                        Some(self.unit.clone()),
-                        Some(vec![State::Pending]),
-                        None,
-                    )
-                    .await?;
+                // Get the pending proofs for this specific operation
+                let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
 
                 if pending_proofs.is_empty() {
                     tracing::warn!(
@@ -674,16 +666,8 @@ impl Wallet {
     /// Compensate a receive saga by removing pending proofs and deleting the saga.
     #[instrument(skip(self))]
     async fn compensate_receive_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Remove pending proofs for this operation
-        let pending_proofs = self
-            .localstore
-            .get_proofs(
-                Some(self.mint_url.clone()),
-                Some(self.unit.clone()),
-                Some(vec![State::Pending]),
-                None,
-            )
-            .await?;
+        // Remove pending proofs for this specific operation
+        let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
         if !pending_proofs.is_empty() {
             let proof_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
             self.localstore.update_proofs(vec![], proof_ys).await?;
@@ -735,15 +719,7 @@ impl Wallet {
         };
 
         // Remove the input proofs (they're spent) and add recovered proofs
-        let pending_proofs = self
-            .localstore
-            .get_proofs(
-                Some(self.mint_url.clone()),
-                Some(self.unit.clone()),
-                Some(vec![State::Pending]),
-                None,
-            )
-            .await?;
+        let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
         let input_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
 
         self.localstore.update_proofs(proof_infos, input_ys).await?;
@@ -768,15 +744,7 @@ impl Wallet {
         );
 
         // Remove the pending input proofs (they're spent)
-        let pending_proofs = self
-            .localstore
-            .get_proofs(
-                Some(self.mint_url.clone()),
-                Some(self.unit.clone()),
-                Some(vec![State::Pending]),
-                None,
-            )
-            .await?;
+        let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
         if !pending_proofs.is_empty() {
             let input_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
             self.localstore.update_proofs(vec![], input_ys).await?;
