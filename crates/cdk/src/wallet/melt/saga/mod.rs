@@ -22,7 +22,7 @@ use cdk_common::wallet::{
 use cdk_common::MeltQuoteState;
 use tracing::instrument;
 
-use self::compensation::{ReleaseMeltQuote, RevertProofReservation};
+use self::compensation::{ReleaseMeltQuote, RevertProofReservation, RevertSwappedProofs};
 use self::state::{Confirmed, Initial, Prepared};
 use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
@@ -393,6 +393,21 @@ impl MeltSaga<Prepared> {
                 )
                 .await?
             {
+                // Track swapped proofs for compensation if melt fails later.
+                // The nested swap saga has completed and deleted its own tracking,
+                // so we must register compensation for these new proofs.
+                let swapped_ys = swapped.ys()?;
+
+                // Register compensation to revert swapped proofs on failure
+                add_compensation(
+                    &self.compensations,
+                    Box::new(RevertSwappedProofs {
+                        localstore: self.wallet.localstore.clone(),
+                        proof_ys: swapped_ys,
+                    }),
+                )
+                .await;
+
                 final_proofs.extend(swapped);
             }
         }
@@ -403,16 +418,21 @@ impl MeltSaga<Prepared> {
             return Err(Error::InsufficientFunds);
         }
 
-        // Since the proofs may be external (not in our database), add them first
+        // Since the proofs may be external (not in our database), add them first.
+        // Set used_by_operation so recovery's release_proofs() can find them,
+        // including any proofs that came from a nested swap operation.
+        let operation_id_str = self.state_data.operation_id.to_string();
         let proofs_info = final_proofs
             .clone()
             .into_iter()
             .map(|p| {
-                ProofInfo::new(
+                ProofInfo::new_with_operations(
                     p,
                     self.wallet.mint_url.clone(),
                     State::Pending,
                     self.wallet.unit.clone(),
+                    Some(operation_id_str.clone()),
+                    None,
                 )
             })
             .collect::<Result<Vec<ProofInfo>, _>>()?;
