@@ -20,7 +20,7 @@ use cdk_common::wallet::{
 use cdk_common::PaymentMethod;
 use tracing::instrument;
 
-use self::compensation::MintCompensation;
+use self::compensation::{MintCompensation, ReleaseMintQuote};
 use self::state::{Finalized, Initial, Prepared};
 use crate::amount::SplitTarget;
 use crate::dhke::construct_proofs;
@@ -98,6 +98,22 @@ impl MintSaga<Initial> {
         if quote_info.payment_method != PaymentMethod::Bolt11 {
             return Err(Error::UnsupportedPaymentMethod);
         }
+
+        // Reserve the quote to prevent concurrent operations from using it
+        self.wallet
+            .localstore
+            .reserve_mint_quote(quote_id, &self.state_data.operation_id)
+            .await?;
+
+        // Register compensation to release quote on failure
+        add_compensation(
+            &self.compensations,
+            Box::new(ReleaseMintQuote {
+                localstore: self.wallet.localstore.clone(),
+                operation_id: self.state_data.operation_id,
+            }),
+        )
+        .await;
 
         let amount_mintable = quote_info.amount_mintable();
 
@@ -260,6 +276,22 @@ impl MintSaga<Initial> {
         if quote_info.expiry.le(&unix_time()) && quote_info.expiry.ne(&0) {
             tracing::info!("Attempting to mint expired quote.");
         }
+
+        // Reserve the quote to prevent concurrent operations from using it
+        self.wallet
+            .localstore
+            .reserve_mint_quote(quote_id, &self.state_data.operation_id)
+            .await?;
+
+        // Register compensation to release quote on failure
+        add_compensation(
+            &self.compensations,
+            Box::new(ReleaseMintQuote {
+                localstore: self.wallet.localstore.clone(),
+                operation_id: self.state_data.operation_id,
+            }),
+        )
+        .await;
 
         let (quote_info, amount) = match amount {
             Some(amount) => (quote_info, amount),
@@ -574,6 +606,23 @@ impl MintSaga<Prepared> {
                 payment_method: Some(self.state_data.payment_method.clone()),
             })
             .await?;
+
+        // Release the mint quote reservation - operation completed successfully
+        // This is important for Bolt12 partial minting where the same quote
+        // may be used for multiple mint operations.
+        if let Err(e) = self
+            .wallet
+            .localstore
+            .release_mint_quote(&operation_id)
+            .await
+        {
+            tracing::warn!(
+                "Failed to release mint quote for operation {}: {}. Quote may remain marked as reserved.",
+                operation_id,
+                e
+            );
+            // Don't fail the mint - proofs are already stored
+        }
 
         // Clear compensations - operation completed successfully
         clear_compensations(&self.compensations).await;

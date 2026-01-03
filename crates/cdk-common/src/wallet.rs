@@ -63,6 +63,9 @@ pub struct MintQuote {
     /// Amount paid to the mint for the quote
     #[serde(default)]
     pub amount_paid: Amount,
+    /// Operation ID that has reserved this quote (for saga pattern)
+    #[serde(default)]
+    pub used_by_operation: Option<String>,
 }
 
 /// Melt Quote Info
@@ -87,6 +90,9 @@ pub struct MeltQuote {
     /// Payment method
     #[serde(default)]
     pub payment_method: PaymentMethod,
+    /// Operation ID that has reserved this quote (for saga pattern)
+    #[serde(default)]
+    pub used_by_operation: Option<String>,
 }
 
 impl MintQuote {
@@ -114,6 +120,7 @@ impl MintQuote {
             secret_key,
             amount_issued: Amount::ZERO,
             amount_paid: Amount::ZERO,
+            used_by_operation: None,
         }
     }
 

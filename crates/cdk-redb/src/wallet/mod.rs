@@ -1162,6 +1162,173 @@ impl WalletDatabase<database::Error> for WalletRedbDatabase {
         Ok(proofs)
     }
 
+    #[instrument(skip(self))]
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
+
+        {
+            let mut table = write_txn
+                .open_table(MELT_QUOTES_TABLE)
+                .map_err(Error::from)?;
+
+            // Read existing quote
+            let quote_json = table
+                .get(quote_id)
+                .map_err(Error::from)?
+                .map(|v| v.value().to_string());
+
+            match quote_json {
+                Some(json) => {
+                    let mut quote: wallet::MeltQuote =
+                        serde_json::from_str(&json).map_err(Error::from)?;
+
+                    // Check if already reserved by another operation
+                    if quote.used_by_operation.is_some() {
+                        return Err(database::Error::QuoteAlreadyInUse);
+                    }
+
+                    // Reserve the quote
+                    quote.used_by_operation = Some(operation_id_str);
+                    let updated_json = serde_json::to_string(&quote).map_err(Error::from)?;
+                    table
+                        .insert(quote_id, updated_json.as_str())
+                        .map_err(Error::from)?;
+                }
+                None => {
+                    return Err(database::Error::UnknownQuote);
+                }
+            }
+        }
+
+        write_txn.commit().map_err(Error::from)?;
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn release_melt_quote(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
+        let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
+
+        {
+            let mut table = write_txn
+                .open_table(MELT_QUOTES_TABLE)
+                .map_err(Error::from)?;
+
+            // Collect all quotes first to avoid borrowing issues
+            let all_quotes: Vec<(String, wallet::MeltQuote)> = table
+                .iter()
+                .map_err(Error::from)?
+                .flatten()
+                .filter_map(|(id, quote_json)| {
+                    let quote: wallet::MeltQuote = serde_json::from_str(quote_json.value()).ok()?;
+                    Some((id.value().to_string(), quote))
+                })
+                .collect();
+
+            // Update quotes that match the operation_id
+            for (quote_id, mut quote) in all_quotes {
+                if quote.used_by_operation.as_deref() == Some(&operation_id_str) {
+                    quote.used_by_operation = None;
+                    let updated_json = serde_json::to_string(&quote).map_err(Error::from)?;
+                    table
+                        .insert(quote_id.as_str(), updated_json.as_str())
+                        .map_err(Error::from)?;
+                }
+            }
+        }
+
+        write_txn.commit().map_err(Error::from)?;
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
+
+        {
+            let mut table = write_txn
+                .open_table(MINT_QUOTES_TABLE)
+                .map_err(Error::from)?;
+
+            // Read existing quote
+            let quote_json = table
+                .get(quote_id)
+                .map_err(Error::from)?
+                .map(|v| v.value().to_string());
+
+            match quote_json {
+                Some(json) => {
+                    let mut quote: MintQuote = serde_json::from_str(&json).map_err(Error::from)?;
+
+                    // Check if already reserved by another operation
+                    if quote.used_by_operation.is_some() {
+                        return Err(database::Error::QuoteAlreadyInUse);
+                    }
+
+                    // Reserve the quote
+                    quote.used_by_operation = Some(operation_id_str);
+                    let updated_json = serde_json::to_string(&quote).map_err(Error::from)?;
+                    table
+                        .insert(quote_id, updated_json.as_str())
+                        .map_err(Error::from)?;
+                }
+                None => {
+                    return Err(database::Error::UnknownQuote);
+                }
+            }
+        }
+
+        write_txn.commit().map_err(Error::from)?;
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn release_mint_quote(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
+        let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let operation_id_str = operation_id.to_string();
+
+        {
+            let mut table = write_txn
+                .open_table(MINT_QUOTES_TABLE)
+                .map_err(Error::from)?;
+
+            // Collect all quotes first to avoid borrowing issues
+            let all_quotes: Vec<(String, MintQuote)> = table
+                .iter()
+                .map_err(Error::from)?
+                .flatten()
+                .filter_map(|(id, quote_json)| {
+                    let quote: MintQuote = serde_json::from_str(quote_json.value()).ok()?;
+                    Some((id.value().to_string(), quote))
+                })
+                .collect();
+
+            // Update quotes that match the operation_id
+            for (quote_id, mut quote) in all_quotes {
+                if quote.used_by_operation.as_deref() == Some(&operation_id_str) {
+                    quote.used_by_operation = None;
+                    let updated_json = serde_json::to_string(&quote).map_err(Error::from)?;
+                    table
+                        .insert(quote_id.as_str(), updated_json.as_str())
+                        .map_err(Error::from)?;
+                }
+            }
+        }
+
+        write_txn.commit().map_err(Error::from)?;
+        Ok(())
+    }
+
     #[instrument(skip(self, value))]
     async fn kv_write(
         &self,

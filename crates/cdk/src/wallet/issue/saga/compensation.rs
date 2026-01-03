@@ -14,9 +14,43 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use cdk_common::database::{self, WalletDatabase};
 use tracing::instrument;
+use uuid::Uuid;
 
 use crate::wallet::saga::CompensatingAction;
 use crate::Error;
+
+/// Compensation action to release a mint quote reservation.
+///
+/// This compensation is used when mint fails after the quote has been reserved
+/// but before it has been used. It clears the used_by_operation field on the quote.
+pub struct ReleaseMintQuote {
+    /// Database reference
+    pub localstore: Arc<dyn WalletDatabase<database::Error> + Send + Sync>,
+    /// Operation ID that reserved the quote
+    pub operation_id: Uuid,
+}
+
+#[async_trait]
+impl CompensatingAction for ReleaseMintQuote {
+    #[instrument(skip_all)]
+    async fn execute(&self) -> Result<(), Error> {
+        tracing::info!(
+            "Compensation: Releasing mint quote reserved by operation {}",
+            self.operation_id
+        );
+
+        self.localstore
+            .release_mint_quote(&self.operation_id)
+            .await
+            .map_err(Error::Database)?;
+
+        Ok(())
+    }
+
+    fn name(&self) -> &'static str {
+        "ReleaseMintQuote"
+    }
+}
 
 /// Placeholder compensation action for mint operations.
 ///

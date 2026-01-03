@@ -22,7 +22,7 @@ use cdk_common::wallet::{
 use cdk_common::MeltQuoteState;
 use tracing::instrument;
 
-use self::compensation::RevertProofReservation;
+use self::compensation::{ReleaseMeltQuote, RevertProofReservation};
 use self::state::{Confirmed, Initial, Prepared};
 use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
@@ -100,6 +100,22 @@ impl MeltSaga<Initial> {
             quote_info.expiry.gt(&unix_time()),
             Error::ExpiredQuote(quote_info.expiry, unix_time())
         );
+
+        // Reserve the quote to prevent concurrent operations from using it
+        self.wallet
+            .localstore
+            .reserve_melt_quote(quote_id, &self.state_data.operation_id)
+            .await?;
+
+        // Register compensation to release quote on failure
+        add_compensation(
+            &self.compensations,
+            Box::new(ReleaseMeltQuote {
+                localstore: self.wallet.localstore.clone(),
+                operation_id: self.state_data.operation_id,
+            }),
+        )
+        .await;
 
         let inputs_needed_amount = quote_info.amount + quote_info.fee_reserve;
 
@@ -579,6 +595,21 @@ impl MeltSaga<Prepared> {
                 payment_method: Some(payment_method),
             })
             .await?;
+
+        // Release the melt quote reservation - operation completed successfully
+        if let Err(e) = self
+            .wallet
+            .localstore
+            .release_melt_quote(&operation_id)
+            .await
+        {
+            tracing::warn!(
+                "Failed to release melt quote for operation {}: {}. Quote may remain marked as reserved.",
+                operation_id,
+                e
+            );
+            // Don't fail the melt - the quote is Paid now and can't be reused anyway
+        }
 
         // Clear compensations - operation completed successfully
         clear_compensations(&self.compensations).await;

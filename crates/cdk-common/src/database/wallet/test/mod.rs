@@ -130,6 +130,7 @@ fn test_melt_quote() -> MeltQuote {
         expiry: 9999999999,
         payment_preimage: None,
         payment_method: PaymentMethod::Bolt11,
+        used_by_operation: None,
     }
 }
 

@@ -27,3 +27,11 @@ ALTER TABLE proof ADD COLUMN IF NOT EXISTS created_by_operation TEXT;
 -- Create index for efficient operation-based proof queries
 CREATE INDEX IF NOT EXISTS proof_used_by_operation_index ON proof(used_by_operation);
 CREATE INDEX IF NOT EXISTS proof_created_by_operation_index ON proof(created_by_operation);
+
+-- Add operation tracking to quote tables to prevent concurrent operations on same quote
+ALTER TABLE melt_quote ADD COLUMN IF NOT EXISTS used_by_operation TEXT;
+ALTER TABLE mint_quote ADD COLUMN IF NOT EXISTS used_by_operation TEXT;
+
+-- Create indexes for efficient operation-based quote queries
+CREATE INDEX IF NOT EXISTS melt_quote_used_by_operation_index ON melt_quote(used_by_operation);
+CREATE INDEX IF NOT EXISTS mint_quote_used_by_operation_index ON mint_quote(used_by_operation);

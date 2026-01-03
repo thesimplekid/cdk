@@ -70,6 +70,11 @@ impl Wallet {
     /// A report of the recovery operations performed.
     #[instrument(skip(self))]
     pub async fn recover_incomplete_sagas(&self) -> Result<RecoveryReport, Error> {
+        // First, clean up any orphaned quote reservations.
+        // These can occur if the wallet crashed after reserving a quote
+        // but before creating the saga record.
+        self.cleanup_orphaned_quote_reservations().await?;
+
         let sagas = self.localstore.get_incomplete_sagas().await?;
 
         if sagas.is_empty() {
@@ -804,6 +809,16 @@ impl Wallet {
                     "Issue saga {} in SecretsPrepared state - cleaning up",
                     saga_id
                 );
+
+                // Release the mint quote reservation
+                if let Err(e) = self.localstore.release_mint_quote(saga_id).await {
+                    tracing::warn!(
+                        "Failed to release mint quote for saga {}: {}. Continuing with saga cleanup.",
+                        saga_id,
+                        e
+                    );
+                }
+
                 self.localstore.delete_saga(saga_id).await?;
                 Ok(RecoveryAction::Compensated)
             }
@@ -979,7 +994,7 @@ impl Wallet {
                     "Melt saga {} in ProofsReserved state - compensating",
                     saga_id
                 );
-                self.compensate_proofs_saga(saga_id).await?;
+                self.compensate_melt_saga(saga_id).await?;
                 Ok(RecoveryAction::Compensated)
             }
             MeltSagaState::MeltRequested | MeltSagaState::PaymentPending => {
@@ -1020,7 +1035,7 @@ impl Wallet {
                                     "Melt saga {} - payment failed, compensating",
                                     saga_id
                                 );
-                                self.compensate_proofs_saga(saga_id).await?;
+                                self.compensate_melt_saga(saga_id).await?;
                                 Ok(RecoveryAction::Compensated)
                             }
                             MeltQuoteState::Pending | MeltQuoteState::Unknown => {
@@ -1195,6 +1210,122 @@ impl Wallet {
         }
 
         self.localstore.delete_saga(saga_id).await?;
+        Ok(())
+    }
+
+    /// Compensation for melt sagas - releases both proofs and the melt quote.
+    #[instrument(skip(self))]
+    async fn compensate_melt_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
+        // Release proofs reserved by this operation
+        if let Err(e) = self.localstore.release_proofs(saga_id).await {
+            tracing::warn!(
+                "Failed to release proofs for saga {}: {}. Continuing with saga cleanup.",
+                saga_id,
+                e
+            );
+        }
+
+        // Release the melt quote reservation
+        if let Err(e) = self.localstore.release_melt_quote(saga_id).await {
+            tracing::warn!(
+                "Failed to release melt quote for saga {}: {}. Continuing with saga cleanup.",
+                saga_id,
+                e
+            );
+        }
+
+        self.localstore.delete_saga(saga_id).await?;
+        Ok(())
+    }
+
+    /// Clean up orphaned quote reservations.
+    ///
+    /// This handles the case where the wallet crashed after reserving a quote
+    /// but before creating the saga record. In this case, the quote is stuck
+    /// in a reserved state with no corresponding saga.
+    ///
+    /// This method:
+    /// 1. Gets all quotes with `used_by_operation` set
+    /// 2. Checks if a corresponding saga exists
+    /// 3. If no saga exists, releases the quote reservation
+    #[instrument(skip(self))]
+    async fn cleanup_orphaned_quote_reservations(&self) -> Result<(), Error> {
+        // Check melt quotes for orphaned reservations
+        let melt_quotes = self.localstore.get_melt_quotes().await?;
+        for quote in melt_quotes {
+            if let Some(ref operation_id_str) = quote.used_by_operation {
+                if let Ok(operation_id) = uuid::Uuid::parse_str(operation_id_str) {
+                    // Check if saga exists
+                    match self.localstore.get_saga(&operation_id).await {
+                        Ok(Some(_)) => {
+                            // Saga exists, this is not orphaned
+                        }
+                        Ok(None) => {
+                            // No saga found - this is an orphaned reservation
+                            tracing::warn!(
+                                "Found orphaned melt quote reservation: quote={}, operation={}. Releasing.",
+                                quote.id,
+                                operation_id
+                            );
+                            if let Err(e) = self.localstore.release_melt_quote(&operation_id).await
+                            {
+                                tracing::error!(
+                                    "Failed to release orphaned melt quote {}: {}",
+                                    quote.id,
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to check saga for melt quote {}: {}",
+                                quote.id,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check mint quotes for orphaned reservations
+        let mint_quotes = self.localstore.get_mint_quotes().await?;
+        for quote in mint_quotes {
+            if let Some(ref operation_id_str) = quote.used_by_operation {
+                if let Ok(operation_id) = uuid::Uuid::parse_str(operation_id_str) {
+                    // Check if saga exists
+                    match self.localstore.get_saga(&operation_id).await {
+                        Ok(Some(_)) => {
+                            // Saga exists, this is not orphaned
+                        }
+                        Ok(None) => {
+                            // No saga found - this is an orphaned reservation
+                            tracing::warn!(
+                                "Found orphaned mint quote reservation: quote={}, operation={}. Releasing.",
+                                quote.id,
+                                operation_id
+                            );
+                            if let Err(e) = self.localstore.release_mint_quote(&operation_id).await
+                            {
+                                tracing::error!(
+                                    "Failed to release orphaned mint quote {}: {}",
+                                    quote.id,
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to check saga for mint quote {}: {}",
+                                quote.id,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }

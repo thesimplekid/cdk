@@ -158,7 +158,8 @@ where
                   state,
                   expiry,
                   payment_preimage,
-                  payment_method
+                  payment_method,
+                  used_by_operation
               FROM
                   melt_quote
               "#,
@@ -312,7 +313,8 @@ where
                 secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                used_by_operation
             FROM
                 mint_quote
             WHERE
@@ -342,7 +344,8 @@ where
                 secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                used_by_operation
             FROM
                 mint_quote
             "#,
@@ -403,7 +406,8 @@ where
                 state,
                 expiry,
                 payment_preimage,
-                payment_method
+                payment_method,
+                used_by_operation
             FROM
                 melt_quote
             WHERE
@@ -1428,6 +1432,122 @@ where
         rows.into_iter().map(sql_row_to_proof_info).collect()
     }
 
+    #[instrument(skip(self))]
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let rows_affected = query(
+            r#"
+            UPDATE melt_quote
+            SET used_by_operation = :operation_id
+            WHERE id = :quote_id AND used_by_operation IS NULL
+            "#,
+        )?
+        .bind("operation_id", operation_id.to_string())
+        .bind("quote_id", quote_id)
+        .execute(&*conn)
+        .await?;
+
+        if rows_affected == 0 {
+            // Check if the quote exists
+            let exists = query(
+                r#"
+                SELECT 1 FROM melt_quote WHERE id = :quote_id
+                "#,
+            )?
+            .bind("quote_id", quote_id)
+            .fetch_one(&*conn)
+            .await?;
+
+            if exists.is_none() {
+                return Err(database::Error::UnknownQuote);
+            }
+            return Err(database::Error::QuoteAlreadyInUse);
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn release_melt_quote(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        query(
+            r#"
+            UPDATE melt_quote
+            SET used_by_operation = NULL
+            WHERE used_by_operation = :operation_id
+            "#,
+        )?
+        .bind("operation_id", operation_id.to_string())
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        let rows_affected = query(
+            r#"
+            UPDATE mint_quote
+            SET used_by_operation = :operation_id
+            WHERE id = :quote_id AND used_by_operation IS NULL
+            "#,
+        )?
+        .bind("operation_id", operation_id.to_string())
+        .bind("quote_id", quote_id)
+        .execute(&*conn)
+        .await?;
+
+        if rows_affected == 0 {
+            // Check if the quote exists
+            let exists = query(
+                r#"
+                SELECT 1 FROM mint_quote WHERE id = :quote_id
+                "#,
+            )?
+            .bind("quote_id", quote_id)
+            .fetch_one(&*conn)
+            .await?;
+
+            if exists.is_none() {
+                return Err(database::Error::UnknownQuote);
+            }
+            return Err(database::Error::QuoteAlreadyInUse);
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn release_mint_quote(&self, operation_id: &uuid::Uuid) -> Result<(), database::Error> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+
+        query(
+            r#"
+            UPDATE mint_quote
+            SET used_by_operation = NULL
+            WHERE used_by_operation = :operation_id
+            "#,
+        )?
+        .bind("operation_id", operation_id.to_string())
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
     async fn kv_write(
         &self,
         primary_namespace: &str,
@@ -1526,7 +1646,8 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
             secret_key,
             row_method,
             row_amount_minted,
-            row_amount_paid
+            row_amount_paid,
+            used_by_operation
         ) = row
     );
 
@@ -1551,6 +1672,7 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
         payment_method,
         amount_issued: amount_minted.into(),
         amount_paid: amount_paid.into(),
+        used_by_operation: column_as_nullable_string!(used_by_operation),
     })
 }
 
@@ -1565,7 +1687,8 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<wallet::MeltQuote, Error> {
             state,
             expiry,
             payment_preimage,
-            row_method
+            row_method,
+            used_by_operation
         ) = row
     );
 
@@ -1585,6 +1708,7 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<wallet::MeltQuote, Error> {
         expiry: column_as_number!(expiry),
         payment_preimage: column_as_nullable_string!(payment_preimage),
         payment_method,
+        used_by_operation: column_as_nullable_string!(used_by_operation),
     })
 }
 
