@@ -39,12 +39,26 @@ use cdk_common::wallet::{
     IssueSagaState, MeltOperationData, MeltSagaState, OperationData, ReceiveSagaState,
     SendSagaState, SwapSagaState, WalletSagaState,
 };
+use cdk_common::BlindedMessage;
 use tracing::instrument;
 
 use crate::dhke::construct_proofs;
 use crate::nuts::{CheckStateRequest, PreMintSecrets, RestoreRequest, State};
 use crate::types::ProofInfo;
 use crate::{Error, Wallet};
+
+/// Parameters for recovering outputs using stored blinded messages.
+///
+/// This struct captures the common data needed across swap, receive, and issue
+/// saga recovery operations.
+struct OutputRecoveryParams<'a> {
+    /// The blinded messages stored during the original operation
+    blinded_messages: &'a [BlindedMessage],
+    /// Counter start for re-deriving secrets
+    counter_start: u32,
+    /// Counter end for re-deriving secrets
+    counter_end: u32,
+}
 
 /// Report of recovery operations performed
 #[derive(Debug, Default)]
@@ -267,107 +281,26 @@ impl Wallet {
             }
         };
 
-        // Check if we have blinded messages stored
-        let blinded_messages = match &swap_data.blinded_messages {
-            Some(bm) if !bm.is_empty() => bm.clone(),
-            _ => {
-                tracing::warn!(
-                    "Swap saga {} - no blinded messages stored, cannot recover outputs. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id
-                );
-                // Fall back to cleanup without recovery
-                return self.cleanup_saga_without_recovery(saga_id).await;
-            }
-        };
-
-        // Get counter range for re-deriving secrets
-        let (counter_start, counter_end) = match (swap_data.counter_start, swap_data.counter_end) {
-            (Some(start), Some(end)) => (start, end),
-            _ => {
-                tracing::warn!(
-                    "Swap saga {} - no counter range stored, cannot recover outputs. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id
-                );
-                return self.cleanup_saga_without_recovery(saga_id).await;
-            }
-        };
-
-        tracing::info!(
-            "Swap saga {} - attempting to recover {} outputs using stored blinded messages",
+        // Extract recovery parameters or fall back to cleanup
+        let params = match Self::extract_recovery_params(
             saga_id,
-            blinded_messages.len()
-        );
-
-        // Query the mint for signatures using the stored blinded messages
-        let restore_request = RestoreRequest {
-            outputs: blinded_messages.clone(),
+            "Swap",
+            swap_data.blinded_messages.as_ref(),
+            swap_data.counter_start,
+            swap_data.counter_end,
+        ) {
+            Some(p) => p,
+            None => return self.cleanup_saga_without_recovery(saga_id).await,
         };
 
-        let restore_response = match self.client.post_restore(restore_request).await {
-            Ok(response) => response,
-            Err(e) => {
-                tracing::warn!(
-                    "Swap saga {} - failed to restore from mint: {}. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id,
-                    e
-                );
-                return self.cleanup_saga_without_recovery(saga_id).await;
-            }
+        // Attempt to recover outputs
+        let proof_infos = match self
+            .recover_outputs_from_blinded_messages(saga_id, "Swap", params)
+            .await?
+        {
+            Some(proofs) => proofs,
+            None => return self.cleanup_saga_without_recovery(saga_id).await,
         };
-
-        if restore_response.signatures.is_empty() {
-            tracing::warn!(
-                "Swap saga {} - mint returned no signatures. \
-                 Outputs may have already been saved or mint doesn't have them.",
-                saga_id
-            );
-            return self.cleanup_saga_without_recovery(saga_id).await;
-        }
-
-        // Get keyset ID from the first blinded message
-        let keyset_id = blinded_messages[0].keyset_id;
-
-        // Re-derive premint secrets using the counter range
-        let premint_secrets =
-            PreMintSecrets::restore_batch(keyset_id, &self.seed, counter_start, counter_end)?;
-
-        // Match the returned outputs to our premint secrets by B_ value
-        let matched_secrets: Vec<_> = premint_secrets
-            .secrets
-            .iter()
-            .filter(|p| restore_response.outputs.contains(&p.blinded_message))
-            .collect();
-
-        if matched_secrets.len() != restore_response.signatures.len() {
-            tracing::warn!(
-                "Swap saga {} - signature count mismatch: {} secrets, {} signatures",
-                saga_id,
-                matched_secrets.len(),
-                restore_response.signatures.len()
-            );
-        }
-
-        // Load keyset keys for proof construction
-        let keys = self.load_keyset_keys(keyset_id).await?;
-
-        // Construct proofs from signatures
-        let proofs = construct_proofs(
-            restore_response.signatures,
-            matched_secrets.iter().map(|p| p.r.clone()).collect(),
-            matched_secrets.iter().map(|p| p.secret.clone()).collect(),
-            &keys,
-        )?;
-
-        tracing::info!("Swap saga {} - recovered {} proofs", saga_id, proofs.len());
-
-        // Store the recovered proofs
-        let proof_infos: Vec<ProofInfo> = proofs
-            .into_iter()
-            .map(|p| ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
 
         // Remove the input proofs (they're spent) and add recovered proofs
         let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
@@ -399,6 +332,159 @@ impl Wallet {
         self.localstore.delete_saga(saga_id).await?;
 
         Ok(())
+    }
+
+    /// Recover outputs using stored blinded messages.
+    ///
+    /// This is the core recovery logic shared between swap, receive, and issue saga
+    /// recovery. It queries the mint for signatures using the stored blinded messages
+    /// and reconstructs the proofs.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(proofs))` - Successfully recovered proofs
+    /// - `Ok(None)` - Could not recover (mint unreachable, no signatures, etc.)
+    ///   Caller should fall back to cleanup.
+    /// - `Err(_)` - Unrecoverable error (e.g., cryptographic failure)
+    #[instrument(skip(self, params))]
+    async fn recover_outputs_from_blinded_messages(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        params: OutputRecoveryParams<'_>,
+    ) -> Result<Option<Vec<ProofInfo>>, Error> {
+        tracing::info!(
+            "{} saga {} - attempting to recover {} outputs using stored blinded messages",
+            saga_type,
+            saga_id,
+            params.blinded_messages.len()
+        );
+
+        // Query the mint for signatures using the stored blinded messages
+        let restore_request = RestoreRequest {
+            outputs: params.blinded_messages.to_vec(),
+        };
+
+        let restore_response = match self.client.post_restore(restore_request).await {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::warn!(
+                    "{} saga {} - failed to restore from mint: {}. \
+                     Run wallet.restore() to recover any missing proofs.",
+                    saga_type,
+                    saga_id,
+                    e
+                );
+                return Ok(None);
+            }
+        };
+
+        if restore_response.signatures.is_empty() {
+            tracing::warn!(
+                "{} saga {} - mint returned no signatures. \
+                 Outputs may have already been saved or mint doesn't have them.",
+                saga_type,
+                saga_id
+            );
+            return Ok(None);
+        }
+
+        // Get keyset ID from the first blinded message
+        let keyset_id = params.blinded_messages[0].keyset_id;
+
+        // Re-derive premint secrets using the counter range
+        let premint_secrets = PreMintSecrets::restore_batch(
+            keyset_id,
+            &self.seed,
+            params.counter_start,
+            params.counter_end,
+        )?;
+
+        // Match the returned outputs to our premint secrets by B_ value
+        let matched_secrets: Vec<_> = premint_secrets
+            .secrets
+            .iter()
+            .filter(|p| restore_response.outputs.contains(&p.blinded_message))
+            .collect();
+
+        if matched_secrets.len() != restore_response.signatures.len() {
+            tracing::warn!(
+                "{} saga {} - signature count mismatch: {} secrets, {} signatures",
+                saga_type,
+                saga_id,
+                matched_secrets.len(),
+                restore_response.signatures.len()
+            );
+        }
+
+        // Load keyset keys for proof construction
+        let keys = self.load_keyset_keys(keyset_id).await?;
+
+        // Construct proofs from signatures
+        let proofs = construct_proofs(
+            restore_response.signatures,
+            matched_secrets.iter().map(|p| p.r.clone()).collect(),
+            matched_secrets.iter().map(|p| p.secret.clone()).collect(),
+            &keys,
+        )?;
+
+        tracing::info!(
+            "{} saga {} - recovered {} proofs",
+            saga_type,
+            saga_id,
+            proofs.len()
+        );
+
+        // Convert to ProofInfo
+        let proof_infos: Vec<ProofInfo> = proofs
+            .into_iter()
+            .map(|p| ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some(proof_infos))
+    }
+
+    /// Extract recovery parameters from operation data.
+    ///
+    /// Returns `None` if the required data (blinded messages, counter range) is missing.
+    fn extract_recovery_params<'a>(
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&'a Vec<BlindedMessage>>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+    ) -> Option<OutputRecoveryParams<'a>> {
+        let blinded_messages = match blinded_messages {
+            Some(bm) if !bm.is_empty() => bm,
+            _ => {
+                tracing::warn!(
+                    "{} saga {} - no blinded messages stored, cannot recover outputs. \
+                     Run wallet.restore() to recover any missing proofs.",
+                    saga_type,
+                    saga_id
+                );
+                return None;
+            }
+        };
+
+        let (counter_start, counter_end) = match (counter_start, counter_end) {
+            (Some(start), Some(end)) => (start, end),
+            _ => {
+                tracing::warn!(
+                    "{} saga {} - no counter range stored, cannot recover outputs. \
+                     Run wallet.restore() to recover any missing proofs.",
+                    saga_type,
+                    saga_id
+                );
+                return None;
+            }
+        };
+
+        Some(OutputRecoveryParams {
+            blinded_messages,
+            counter_start,
+            counter_end,
+        })
     }
 
     /// Recover a send saga.
@@ -627,111 +713,26 @@ impl Wallet {
             }
         };
 
-        // Check if we have blinded messages stored
-        let blinded_messages = match &receive_data.blinded_messages {
-            Some(bm) if !bm.is_empty() => bm.clone(),
-            _ => {
-                tracing::warn!(
-                    "Receive saga {} - no blinded messages stored, cannot recover outputs. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id
-                );
-                return self.cleanup_receive_saga_without_recovery(saga_id).await;
-            }
-        };
-
-        // Get counter range for re-deriving secrets
-        let (counter_start, counter_end) =
-            match (receive_data.counter_start, receive_data.counter_end) {
-                (Some(start), Some(end)) => (start, end),
-                _ => {
-                    tracing::warn!(
-                        "Receive saga {} - no counter range stored, cannot recover outputs. \
-                         Run wallet.restore() to recover any missing proofs.",
-                        saga_id
-                    );
-                    return self.cleanup_receive_saga_without_recovery(saga_id).await;
-                }
-            };
-
-        tracing::info!(
-            "Receive saga {} - attempting to recover {} outputs using stored blinded messages",
+        // Extract recovery parameters or fall back to cleanup
+        let params = match Self::extract_recovery_params(
             saga_id,
-            blinded_messages.len()
-        );
-
-        // Query the mint for signatures using the stored blinded messages
-        let restore_request = RestoreRequest {
-            outputs: blinded_messages.clone(),
+            "Receive",
+            receive_data.blinded_messages.as_ref(),
+            receive_data.counter_start,
+            receive_data.counter_end,
+        ) {
+            Some(p) => p,
+            None => return self.cleanup_receive_saga_without_recovery(saga_id).await,
         };
 
-        let restore_response = match self.client.post_restore(restore_request).await {
-            Ok(response) => response,
-            Err(e) => {
-                tracing::warn!(
-                    "Receive saga {} - failed to restore from mint: {}. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id,
-                    e
-                );
-                return self.cleanup_receive_saga_without_recovery(saga_id).await;
-            }
+        // Attempt to recover outputs
+        let proof_infos = match self
+            .recover_outputs_from_blinded_messages(saga_id, "Receive", params)
+            .await?
+        {
+            Some(proofs) => proofs,
+            None => return self.cleanup_receive_saga_without_recovery(saga_id).await,
         };
-
-        if restore_response.signatures.is_empty() {
-            tracing::warn!(
-                "Receive saga {} - mint returned no signatures. \
-                 Outputs may have already been saved or mint doesn't have them.",
-                saga_id
-            );
-            return self.cleanup_receive_saga_without_recovery(saga_id).await;
-        }
-
-        // Get keyset ID from the first blinded message
-        let keyset_id = blinded_messages[0].keyset_id;
-
-        // Re-derive premint secrets using the counter range
-        let premint_secrets =
-            PreMintSecrets::restore_batch(keyset_id, &self.seed, counter_start, counter_end)?;
-
-        // Match the returned outputs to our premint secrets by B_ value
-        let matched_secrets: Vec<_> = premint_secrets
-            .secrets
-            .iter()
-            .filter(|p| restore_response.outputs.contains(&p.blinded_message))
-            .collect();
-
-        if matched_secrets.len() != restore_response.signatures.len() {
-            tracing::warn!(
-                "Receive saga {} - signature count mismatch: {} secrets, {} signatures",
-                saga_id,
-                matched_secrets.len(),
-                restore_response.signatures.len()
-            );
-        }
-
-        // Load keyset keys for proof construction
-        let keys = self.load_keyset_keys(keyset_id).await?;
-
-        // Construct proofs from signatures
-        let proofs = construct_proofs(
-            restore_response.signatures,
-            matched_secrets.iter().map(|p| p.r.clone()).collect(),
-            matched_secrets.iter().map(|p| p.secret.clone()).collect(),
-            &keys,
-        )?;
-
-        tracing::info!(
-            "Receive saga {} - recovered {} proofs",
-            saga_id,
-            proofs.len()
-        );
-
-        // Store the recovered proofs
-        let proof_infos: Vec<ProofInfo> = proofs
-            .into_iter()
-            .map(|p| ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
 
         // Remove the input proofs (they're spent) and add recovered proofs
         let pending_proofs = self
@@ -854,112 +855,36 @@ impl Wallet {
             }
         };
 
-        // Check if we have blinded messages stored
-        let blinded_messages = match &issue_data.blinded_messages {
-            Some(bm) if !bm.is_empty() => bm.clone(),
-            _ => {
-                tracing::warn!(
-                    "Issue saga {} - no blinded messages stored, cannot recover outputs. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id
-                );
-                self.localstore.delete_saga(saga_id).await?;
-                return Ok(());
-            }
-        };
-
-        // Get counter range for re-deriving secrets
-        let (counter_start, counter_end) = match (issue_data.counter_start, issue_data.counter_end)
-        {
-            (Some(start), Some(end)) => (start, end),
-            _ => {
-                tracing::warn!(
-                    "Issue saga {} - no counter range stored, cannot recover outputs. \
-                         Run wallet.restore() to recover any missing proofs.",
-                    saga_id
-                );
-                self.localstore.delete_saga(saga_id).await?;
-                return Ok(());
-            }
-        };
-
-        tracing::info!(
-            "Issue saga {} - attempting to recover {} outputs using stored blinded messages",
+        // Extract recovery parameters or fall back to cleanup
+        let params = match Self::extract_recovery_params(
             saga_id,
-            blinded_messages.len()
-        );
-
-        // Query the mint for signatures using the stored blinded messages
-        let restore_request = RestoreRequest {
-            outputs: blinded_messages.clone(),
-        };
-
-        let restore_response = match self.client.post_restore(restore_request).await {
-            Ok(response) => response,
-            Err(e) => {
-                tracing::warn!(
-                    "Issue saga {} - failed to restore from mint: {}. \
-                     Run wallet.restore() to recover any missing proofs.",
-                    saga_id,
-                    e
-                );
+            "Issue",
+            issue_data.blinded_messages.as_ref(),
+            issue_data.counter_start,
+            issue_data.counter_end,
+        ) {
+            Some(p) => p,
+            None => {
+                // Issue saga has no input proofs - just delete the saga
                 self.localstore.delete_saga(saga_id).await?;
                 return Ok(());
             }
         };
 
-        if restore_response.signatures.is_empty() {
-            tracing::warn!(
-                "Issue saga {} - mint returned no signatures. \
-                 Outputs may have already been saved or mint doesn't have them.",
-                saga_id
-            );
-            self.localstore.delete_saga(saga_id).await?;
-            return Ok(());
-        }
+        // Attempt to recover outputs
+        let proof_infos = match self
+            .recover_outputs_from_blinded_messages(saga_id, "Issue", params)
+            .await?
+        {
+            Some(proofs) => proofs,
+            None => {
+                // Issue saga has no input proofs - just delete the saga
+                self.localstore.delete_saga(saga_id).await?;
+                return Ok(());
+            }
+        };
 
-        // Get keyset ID from the first blinded message
-        let keyset_id = blinded_messages[0].keyset_id;
-
-        // Re-derive premint secrets using the counter range
-        let premint_secrets =
-            PreMintSecrets::restore_batch(keyset_id, &self.seed, counter_start, counter_end)?;
-
-        // Match the returned outputs to our premint secrets by B_ value
-        let matched_secrets: Vec<_> = premint_secrets
-            .secrets
-            .iter()
-            .filter(|p| restore_response.outputs.contains(&p.blinded_message))
-            .collect();
-
-        if matched_secrets.len() != restore_response.signatures.len() {
-            tracing::warn!(
-                "Issue saga {} - signature count mismatch: {} secrets, {} signatures",
-                saga_id,
-                matched_secrets.len(),
-                restore_response.signatures.len()
-            );
-        }
-
-        // Load keyset keys for proof construction
-        let keys = self.load_keyset_keys(keyset_id).await?;
-
-        // Construct proofs from signatures
-        let proofs = construct_proofs(
-            restore_response.signatures,
-            matched_secrets.iter().map(|p| p.r.clone()).collect(),
-            matched_secrets.iter().map(|p| p.secret.clone()).collect(),
-            &keys,
-        )?;
-
-        tracing::info!("Issue saga {} - recovered {} proofs", saga_id, proofs.len());
-
-        // Store the recovered proofs
-        let proof_infos: Vec<ProofInfo> = proofs
-            .into_iter()
-            .map(|p| ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
-
+        // Issue has no input proofs to remove - just add the recovered proofs
         self.localstore.update_proofs(proof_infos, vec![]).await?;
 
         // Delete the saga record
