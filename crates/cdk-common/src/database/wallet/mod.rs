@@ -224,6 +224,52 @@ where
     /// Get proofs reserved by an operation
     async fn get_reserved_proofs(&self, operation_id: &uuid::Uuid) -> Result<Vec<ProofInfo>, Err>;
 
+    /// Reserve a melt quote for an operation.
+    ///
+    /// Atomically marks the quote as used by the operation. This prevents
+    /// concurrent operations from using the same quote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::QuoteAlreadyInUse` if the quote is already reserved
+    /// by another operation.
+    /// Returns `Error::UnknownQuote` if the quote doesn't exist.
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), Err>;
+
+    /// Release a melt quote reserved by an operation.
+    ///
+    /// Clears the `used_by_operation` field for the quote, allowing it to be
+    /// used by another operation. This is called during saga compensation
+    /// or after successful completion.
+    async fn release_melt_quote(&self, operation_id: &uuid::Uuid) -> Result<(), Err>;
+
+    /// Reserve a mint quote for an operation.
+    ///
+    /// Atomically marks the quote as used by the operation. This prevents
+    /// concurrent operations from using the same quote.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::QuoteAlreadyInUse` if the quote is already reserved
+    /// by another operation.
+    /// Returns `Error::UnknownQuote` if the quote doesn't exist.
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), Err>;
+
+    /// Release a mint quote reserved by an operation.
+    ///
+    /// Clears the `used_by_operation` field for the quote, allowing it to be
+    /// used by another operation. This is called during saga compensation
+    /// or after successful completion.
+    async fn release_mint_quote(&self, operation_id: &uuid::Uuid) -> Result<(), Err>;
+
     /// Write a value to the key-value store
     async fn kv_write(
         &self,
