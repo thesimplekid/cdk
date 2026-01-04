@@ -1232,3 +1232,453 @@ enum RecoveryAction {
     /// The saga was skipped (e.g., mint unreachable)
     Skipped,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use bip39::Mnemonic;
+    use cdk_common::database::WalletDatabase;
+    use cdk_common::mint_url::MintUrl;
+    use cdk_common::nuts::{CurrencyUnit, Id, MeltQuoteState, Proof, State};
+    use cdk_common::secret::Secret;
+    use cdk_common::wallet::{
+        MeltOperationData, MeltQuote, MintOperationData, MintQuote, OperationData,
+        ReceiveOperationData, SendOperationData, SwapOperationData, WalletSaga, WalletSagaState,
+    };
+    use cdk_common::{Amount, PaymentMethod, SecretKey};
+
+    use super::*;
+
+    /// Create test database
+    async fn create_test_db() -> Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>
+    {
+        Arc::new(cdk_sqlite::wallet::memory::empty().await.unwrap())
+    }
+
+    /// Create a test mint URL
+    fn test_mint_url() -> MintUrl {
+        MintUrl::from_str("https://test-mint.example.com").unwrap()
+    }
+
+    /// Create a test keyset ID
+    fn test_keyset_id() -> Id {
+        Id::from_str("00916bbf7ef91a36").unwrap()
+    }
+
+    /// Create a test proof
+    fn test_proof(keyset_id: Id, amount: u64) -> Proof {
+        Proof {
+            amount: Amount::from(amount),
+            keyset_id,
+            secret: Secret::generate(),
+            c: SecretKey::generate().public_key(),
+            witness: None,
+            dleq: None,
+        }
+    }
+
+    /// Create a test proof info in Unspent state
+    fn test_proof_info(keyset_id: Id, amount: u64, mint_url: MintUrl) -> crate::types::ProofInfo {
+        let proof = test_proof(keyset_id, amount);
+        crate::types::ProofInfo::new(proof, mint_url, State::Unspent, CurrencyUnit::Sat).unwrap()
+    }
+
+    /// Create a test melt quote
+    fn test_melt_quote() -> MeltQuote {
+        MeltQuote {
+            id: format!("test_melt_quote_{}", uuid::Uuid::new_v4()),
+            unit: CurrencyUnit::Sat,
+            amount: Amount::from(1000),
+            request: "lnbc1000...".to_string(),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Unpaid,
+            expiry: 9999999999,
+            payment_preimage: None,
+            payment_method: PaymentMethod::Bolt11,
+            used_by_operation: None,
+        }
+    }
+
+    /// Create a test mint quote
+    fn test_mint_quote(mint_url: MintUrl) -> MintQuote {
+        MintQuote::new(
+            format!("test_mint_quote_{}", uuid::Uuid::new_v4()),
+            mint_url,
+            PaymentMethod::Bolt11,
+            Some(Amount::from(1000)),
+            CurrencyUnit::Sat,
+            "lnbc1000...".to_string(),
+            9999999999,
+            None,
+        )
+    }
+
+    /// Create a test wallet
+    async fn create_test_wallet(
+        db: Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>,
+    ) -> Wallet {
+        let mint_url = "https://test-mint.example.com";
+        let seed = Mnemonic::generate(12).unwrap().to_seed_normalized("");
+
+        Wallet::new(mint_url, CurrencyUnit::Sat, db, seed, None).unwrap()
+    }
+
+    // =========================================================================
+    // Phase 1.3: Early State Recovery Tests (No Mint Required)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_recover_swap_proofs_reserved() {
+        // Test that swap saga in ProofsReserved state gets compensated:
+        // - Reserved proofs are released back to Unspent
+        // - Saga record is deleted
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and store proofs, then reserve them
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create saga in ProofsReserved state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Swap(SwapSagaState::ProofsReserved),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Swap(SwapOperationData {
+                input_amount: Amount::from(100),
+                output_amount: Amount::from(90),
+                counter_start: Some(0),
+                counter_end: Some(10),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Create wallet and run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Verify compensation occurred
+        assert_eq!(report.compensated, 1);
+        assert_eq!(report.recovered, 0);
+        assert_eq!(report.failed, 0);
+
+        // Verify proofs are released (back to Unspent)
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+        assert_eq!(proofs[0].y, proof_y);
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_send_proofs_reserved() {
+        // Test that send saga in ProofsReserved state gets compensated
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and store proofs, then reserve them
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create saga in ProofsReserved state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Send(SendSagaState::ProofsReserved),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Send(SendOperationData {
+                amount: Amount::from(100),
+                memo: None,
+                counter_start: None,
+                counter_end: None,
+                token: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify proofs are released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_receive_proofs_pending() {
+        // Test that receive saga in ProofsPending state gets compensated:
+        // - Saga is deleted
+        // - If there are no reserved proofs (proofs are just Pending), just cleanup saga
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create saga in ProofsPending state (no proofs to reserve for this test,
+        // just test that the saga gets cleaned up)
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Receive(ReceiveSagaState::ProofsPending),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Receive(ReceiveOperationData {
+                token: "cashu...".to_string(),
+                counter_start: None,
+                counter_end: None,
+                amount: Some(Amount::from(100)),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_issue_secrets_prepared() {
+        // Test that issue saga in SecretsPrepared state gets compensated:
+        // - Quote reservation is released
+        // - Saga is deleted
+        // - Counter gaps are acceptable (not tested here, just cleanup)
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create a mint quote reserved by this operation
+        let mut quote = test_mint_quote(mint_url.clone());
+        quote.used_by_operation = Some(saga_id.to_string());
+        db.add_mint_quote(quote.clone()).await.unwrap();
+
+        // Create saga in SecretsPrepared state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Issue(IssueSagaState::SecretsPrepared),
+            Amount::from(1000),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Mint(MintOperationData {
+                quote_id: quote.id.clone(),
+                amount: Amount::from(1000),
+                counter_start: Some(0),
+                counter_end: Some(10),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify quote reservation is released
+        let retrieved_quote = db.get_mint_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_proofs_reserved() {
+        // Test that melt saga in ProofsReserved state gets compensated:
+        // - Reserved proofs are released
+        // - Quote reservation is released
+        // - Saga is deleted
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and store proofs, then reserve them
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote reserved by this operation
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        db.add_melt_quote(quote.clone()).await.unwrap();
+
+        // Create saga in ProofsReserved state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::ProofsReserved),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote.id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 1);
+
+        // Verify proofs are released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Verify melt quote reservation is released
+        let retrieved_quote = db.get_melt_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Verify saga is deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_no_incomplete_sagas() {
+        // Test that recovery with no incomplete sagas returns empty report
+        let db = create_test_db().await;
+        let wallet = create_test_wallet(db.clone()).await;
+
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.recovered, 0);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.skipped, 0);
+        assert_eq!(report.failed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_recover_multiple_sagas() {
+        // Test that recovery handles multiple sagas
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+
+        // Create 3 sagas in different early states
+        for _ in 0..3 {
+            let saga_id = uuid::Uuid::new_v4();
+
+            let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+            let proof_y = proof_info.y;
+            db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+            db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+            let saga = WalletSaga::new(
+                saga_id,
+                WalletSagaState::Swap(SwapSagaState::ProofsReserved),
+                Amount::from(100),
+                mint_url.clone(),
+                CurrencyUnit::Sat,
+                OperationData::Swap(SwapOperationData {
+                    input_amount: Amount::from(100),
+                    output_amount: Amount::from(90),
+                    counter_start: Some(0),
+                    counter_end: Some(10),
+                    blinded_messages: None,
+                }),
+            );
+            db.add_saga(saga).await.unwrap();
+        }
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        assert_eq!(report.compensated, 3);
+
+        // All proofs should be released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 3);
+
+        // All sagas should be deleted
+        let sagas = db.get_incomplete_sagas().await.unwrap();
+        assert!(sagas.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_orphaned_melt_quote_reservation() {
+        // Test that orphaned melt quote reservations are cleaned up
+        let db = create_test_db().await;
+        let operation_id = uuid::Uuid::new_v4();
+
+        // Create a melt quote with reservation but NO corresponding saga
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(operation_id.to_string());
+        db.add_melt_quote(quote.clone()).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let _report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Verify orphaned quote reservation is released
+        let retrieved_quote = db.get_melt_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_orphaned_mint_quote_reservation() {
+        // Test that orphaned mint quote reservations are cleaned up
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let operation_id = uuid::Uuid::new_v4();
+
+        // Create a mint quote with reservation but NO corresponding saga
+        let mut quote = test_mint_quote(mint_url);
+        quote.used_by_operation = Some(operation_id.to_string());
+        db.add_mint_quote(quote.clone()).await.unwrap();
+
+        // Run recovery
+        let wallet = create_test_wallet(db.clone()).await;
+        let _report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Verify orphaned quote reservation is released
+        let retrieved_quote = db.get_mint_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+    }
+}

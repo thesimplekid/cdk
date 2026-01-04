@@ -100,3 +100,145 @@ impl CompensatingAction for MintCompensation {
         "MintCompensation"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use cdk_common::database::WalletDatabase;
+    use cdk_common::nuts::CurrencyUnit;
+    use cdk_common::wallet::{
+        MintQuote, OperationData, SwapOperationData, SwapSagaState, WalletSaga, WalletSagaState,
+    };
+    use cdk_common::{Amount, PaymentMethod};
+
+    use super::*;
+
+    /// Create test database
+    async fn create_test_db() -> Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>
+    {
+        Arc::new(cdk_sqlite::wallet::memory::empty().await.unwrap())
+    }
+
+    /// Create a test mint URL
+    fn test_mint_url() -> cdk_common::mint_url::MintUrl {
+        cdk_common::mint_url::MintUrl::from_str("https://test-mint.example.com").unwrap()
+    }
+
+    /// Create a test wallet saga
+    fn test_wallet_saga(mint_url: cdk_common::mint_url::MintUrl) -> WalletSaga {
+        WalletSaga::new(
+            uuid::Uuid::new_v4(),
+            WalletSagaState::Swap(SwapSagaState::ProofsReserved),
+            Amount::from(1000),
+            mint_url,
+            CurrencyUnit::Sat,
+            OperationData::Swap(SwapOperationData {
+                input_amount: Amount::from(1000),
+                output_amount: Amount::from(990),
+                counter_start: Some(0),
+                counter_end: Some(10),
+                blinded_messages: None,
+            }),
+        )
+    }
+
+    /// Create a test mint quote
+    fn test_mint_quote(mint_url: cdk_common::mint_url::MintUrl) -> MintQuote {
+        MintQuote::new(
+            format!("test_quote_{}", uuid::Uuid::new_v4()),
+            mint_url,
+            PaymentMethod::Bolt11,
+            Some(Amount::from(1000)),
+            CurrencyUnit::Sat,
+            "lnbc1000...".to_string(),
+            9999999999,
+            None,
+        )
+    }
+
+    // =========================================================================
+    // ReleaseMintQuote Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_release_mint_quote_is_idempotent() {
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let operation_id = uuid::Uuid::new_v4();
+
+        let mut quote = test_mint_quote(mint_url);
+        quote.used_by_operation = Some(operation_id.to_string());
+        db.add_mint_quote(quote.clone()).await.unwrap();
+
+        let compensation = ReleaseMintQuote {
+            localstore: db.clone(),
+            operation_id,
+        };
+
+        // Execute twice
+        compensation.execute().await.unwrap();
+        compensation.execute().await.unwrap();
+
+        let retrieved_quote = db.get_mint_quote(&quote.id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_release_mint_quote_handles_no_matching_quote() {
+        let db = create_test_db().await;
+        let operation_id = uuid::Uuid::new_v4();
+
+        // Don't add any quote - compensation should still succeed
+        let compensation = ReleaseMintQuote {
+            localstore: db.clone(),
+            operation_id,
+        };
+
+        // Should not error even with no matching quote
+        let result = compensation.execute().await;
+        assert!(result.is_ok());
+    }
+
+    // =========================================================================
+    // MintCompensation Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_mint_compensation_is_idempotent() {
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+
+        let saga = test_wallet_saga(mint_url);
+        let saga_id = saga.id;
+        db.add_saga(saga).await.unwrap();
+
+        let compensation = MintCompensation {
+            localstore: db.clone(),
+            quote_id: "test_quote".to_string(),
+            saga_id,
+        };
+
+        // Execute twice - should succeed both times
+        compensation.execute().await.unwrap();
+        compensation.execute().await.unwrap();
+
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_mint_compensation_handles_missing_saga() {
+        let db = create_test_db().await;
+        let saga_id = uuid::Uuid::new_v4();
+
+        let compensation = MintCompensation {
+            localstore: db.clone(),
+            quote_id: "test_quote".to_string(),
+            saga_id,
+        };
+
+        // Should succeed even without saga
+        let result = compensation.execute().await;
+        assert!(result.is_ok());
+    }
+}

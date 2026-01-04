@@ -84,3 +84,176 @@ pub async fn clear_compensations(compensations: &Compensations) {
 pub async fn add_compensation(compensations: &Compensations, action: Box<dyn CompensatingAction>) {
     compensations.lock().await.push_front(action);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A mock compensating action for testing that tracks execution order.
+    struct MockCompensation {
+        name: &'static str,
+        execution_order: Arc<std::sync::Mutex<Vec<&'static str>>>,
+        should_fail: bool,
+    }
+
+    impl MockCompensation {
+        fn new(
+            name: &'static str,
+            execution_order: Arc<std::sync::Mutex<Vec<&'static str>>>,
+        ) -> Self {
+            Self {
+                name,
+                execution_order,
+                should_fail: false,
+            }
+        }
+
+        fn failing(
+            name: &'static str,
+            execution_order: Arc<std::sync::Mutex<Vec<&'static str>>>,
+        ) -> Self {
+            Self {
+                name,
+                execution_order,
+                should_fail: true,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl CompensatingAction for MockCompensation {
+        async fn execute(&self) -> Result<(), Error> {
+            self.execution_order.lock().unwrap().push(self.name);
+            if self.should_fail {
+                Err(Error::Custom("Intentional test failure".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn name(&self) -> &'static str {
+            self.name
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compensations_lifo_order() {
+        // Test that compensations execute in LIFO (most-recent-first) order
+        let compensations = new_compensations();
+        let execution_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        // Add compensations in order: first, second, third
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("first", execution_order.clone())),
+        )
+        .await;
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("second", execution_order.clone())),
+        )
+        .await;
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("third", execution_order.clone())),
+        )
+        .await;
+
+        // Execute compensations
+        execute_compensations(&compensations).await.unwrap();
+
+        // Verify LIFO order: third (most recent) should execute first
+        let order = execution_order.lock().unwrap();
+        assert_eq!(order.as_slice(), &["third", "second", "first"]);
+    }
+
+    #[tokio::test]
+    async fn test_compensations_continues_on_error() {
+        // Test that one failed compensation doesn't stop others from executing
+        let compensations = new_compensations();
+        let execution_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        // Add: first (will succeed), second (will fail), third (will succeed)
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("first", execution_order.clone())),
+        )
+        .await;
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::failing(
+                "second_fails",
+                execution_order.clone(),
+            )),
+        )
+        .await;
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("third", execution_order.clone())),
+        )
+        .await;
+
+        // Execute compensations - should complete without error even though one failed
+        let result = execute_compensations(&compensations).await;
+        assert!(result.is_ok());
+
+        // All three should have executed despite the middle one failing
+        let order = execution_order.lock().unwrap();
+        assert_eq!(order.as_slice(), &["third", "second_fails", "first"]);
+    }
+
+    #[tokio::test]
+    async fn test_compensations_empty_queue() {
+        // Test that empty queue operations work correctly
+        let compensations = new_compensations();
+
+        // Execute on empty queue should succeed
+        let result = execute_compensations(&compensations).await;
+        assert!(result.is_ok());
+
+        // Clear on empty queue should succeed
+        clear_compensations(&compensations).await;
+
+        // Queue should still be empty
+        assert!(compensations.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_clear_compensations() {
+        // Test that clear_compensations removes all actions
+        let compensations = new_compensations();
+        let execution_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        // Add some compensations
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("first", execution_order.clone())),
+        )
+        .await;
+        add_compensation(
+            &compensations,
+            Box::new(MockCompensation::new("second", execution_order.clone())),
+        )
+        .await;
+
+        // Verify queue is not empty
+        assert!(!compensations.lock().await.is_empty());
+
+        // Clear the queue
+        clear_compensations(&compensations).await;
+
+        // Verify queue is now empty
+        assert!(compensations.lock().await.is_empty());
+
+        // Execute should do nothing
+        execute_compensations(&compensations).await.unwrap();
+        assert!(execution_order.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_new_compensations_creates_empty_queue() {
+        // Test that new_compensations creates an empty queue
+        let compensations = new_compensations();
+        assert!(compensations.lock().await.is_empty());
+    }
+}
