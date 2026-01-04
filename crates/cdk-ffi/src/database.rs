@@ -225,6 +225,28 @@ pub trait WalletDatabase: Send + Sync {
 
     /// Get proofs reserved by an operation
     async fn get_reserved_proofs(&self, operation_id: String) -> Result<Vec<ProofInfo>, FfiError>;
+
+    // ========== Quote reservation methods ==========
+
+    /// Reserve a melt quote for an operation
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: String,
+        operation_id: String,
+    ) -> Result<(), FfiError>;
+
+    /// Release a melt quote reserved by an operation
+    async fn release_melt_quote(&self, operation_id: String) -> Result<(), FfiError>;
+
+    /// Reserve a mint quote for an operation
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: String,
+        operation_id: String,
+    ) -> Result<(), FfiError>;
+
+    /// Release a mint quote reserved by an operation
+    async fn release_mint_quote(&self, operation_id: String) -> Result<(), FfiError>;
 }
 
 /// Internal bridge trait to convert from the FFI trait to the CDK database trait
@@ -924,6 +946,48 @@ impl CdkWalletDatabase<cdk::cdk_database::Error> for WalletDatabaseBridge {
             .await
             .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
     }
+
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk::cdk_database::Error> {
+        self.ffi_db
+            .reserve_melt_quote(quote_id.to_string(), operation_id.to_string())
+            .await
+            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
+    }
+
+    async fn release_melt_quote(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk::cdk_database::Error> {
+        self.ffi_db
+            .release_melt_quote(operation_id.to_string())
+            .await
+            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
+    }
+
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk::cdk_database::Error> {
+        self.ffi_db
+            .reserve_mint_quote(quote_id.to_string(), operation_id.to_string())
+            .await
+            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
+    }
+
+    async fn release_mint_quote(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk::cdk_database::Error> {
+        self.ffi_db
+            .release_mint_quote(operation_id.to_string())
+            .await
+            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
+    }
 }
 
 pub(crate) struct FfiWalletSQLDatabase<RM>
@@ -1460,6 +1524,52 @@ where
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
 
         Ok(result.into_iter().map(Into::into).collect())
+    }
+
+    // ========== Quote reservation methods ==========
+
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: String,
+        operation_id: String,
+    ) -> Result<(), FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
+        self.inner
+            .reserve_melt_quote(&quote_id, &operation_id)
+            .await
+            .map_err(|e| FfiError::Database { msg: e.to_string() })
+    }
+
+    async fn release_melt_quote(&self, operation_id: String) -> Result<(), FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
+        self.inner
+            .release_melt_quote(&operation_id)
+            .await
+            .map_err(|e| FfiError::Database { msg: e.to_string() })
+    }
+
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: String,
+        operation_id: String,
+    ) -> Result<(), FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
+        self.inner
+            .reserve_mint_quote(&quote_id, &operation_id)
+            .await
+            .map_err(|e| FfiError::Database { msg: e.to_string() })
+    }
+
+    async fn release_mint_quote(&self, operation_id: String) -> Result<(), FfiError> {
+        let operation_id = uuid::Uuid::parse_str(&operation_id)
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
+        self.inner
+            .release_mint_quote(&operation_id)
+            .await
+            .map_err(|e| FfiError::Database { msg: e.to_string() })
     }
 }
 

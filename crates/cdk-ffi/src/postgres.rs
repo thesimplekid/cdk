@@ -315,4 +315,30 @@ impl WalletDatabase for WalletPostgresDatabase {
     async fn get_reserved_proofs(&self, operation_id: String) -> Result<Vec<ProofInfo>, FfiError> {
         self.inner.get_reserved_proofs(operation_id).await
     }
+
+    // ========== Quote reservation methods ==========
+
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: String,
+        operation_id: String,
+    ) -> Result<(), FfiError> {
+        self.inner.reserve_melt_quote(quote_id, operation_id).await
+    }
+
+    async fn release_melt_quote(&self, operation_id: String) -> Result<(), FfiError> {
+        self.inner.release_melt_quote(operation_id).await
+    }
+
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: String,
+        operation_id: String,
+    ) -> Result<(), FfiError> {
+        self.inner.reserve_mint_quote(quote_id, operation_id).await
+    }
+
+    async fn release_mint_quote(&self, operation_id: String) -> Result<(), FfiError> {
+        self.inner.release_mint_quote(operation_id).await
+    }
 }

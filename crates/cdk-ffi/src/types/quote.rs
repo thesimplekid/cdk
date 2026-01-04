@@ -31,6 +31,8 @@ pub struct MintQuote {
     pub payment_method: PaymentMethod,
     /// Secret key (optional, hex-encoded)
     pub secret_key: Option<String>,
+    /// Used by operation ID
+    pub used_by_operation: Option<String>,
 }
 
 impl From<cdk::wallet::MintQuote> for MintQuote {
@@ -47,6 +49,7 @@ impl From<cdk::wallet::MintQuote> for MintQuote {
             amount_paid: quote.amount_paid.into(),
             payment_method: quote.payment_method.into(),
             secret_key: quote.secret_key.map(|sk| sk.to_secret_hex()),
+            used_by_operation: quote.used_by_operation,
         }
     }
 }
@@ -73,6 +76,7 @@ impl TryFrom<MintQuote> for cdk::wallet::MintQuote {
             amount_paid: quote.amount_paid.into(),
             payment_method: quote.payment_method.into(),
             secret_key,
+            used_by_operation: quote.used_by_operation,
         })
     }
 }
@@ -231,6 +235,8 @@ pub struct MeltQuote {
     pub payment_preimage: Option<String>,
     /// Payment method
     pub payment_method: PaymentMethod,
+    /// Used by operation ID
+    pub used_by_operation: Option<String>,
 }
 
 impl From<cdk::wallet::MeltQuote> for MeltQuote {
@@ -245,6 +251,7 @@ impl From<cdk::wallet::MeltQuote> for MeltQuote {
             expiry: quote.expiry,
             payment_preimage: quote.payment_preimage.clone(),
             payment_method: quote.payment_method.into(),
+            used_by_operation: quote.used_by_operation,
         }
     }
 }
@@ -263,6 +270,7 @@ impl TryFrom<MeltQuote> for cdk::wallet::MeltQuote {
             expiry: quote.expiry,
             payment_preimage: quote.payment_preimage,
             payment_method: quote.payment_method.into(),
+            used_by_operation: quote.used_by_operation,
         })
     }
 }
