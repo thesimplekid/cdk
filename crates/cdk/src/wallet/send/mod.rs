@@ -1,11 +1,13 @@
 //! Send Module
 //!
-//! This module provides the send functionality for the wallet using the saga pattern.
+//! This module provides the send functionality for the wallet.
 //!
-//! The `SendSaga` provides compile-time safety for state transitions and automatic
-//! compensation on failure. `PreparedSend` is a type alias for backward compatibility.
+//! Use [`Wallet::prepare_send`] to create a [`PreparedSend`], then call
+//! [`confirm`](PreparedSend::confirm) to complete the send or
+//! [`cancel`](PreparedSend::cancel) to release reserved proofs.
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use cdk_common::Id;
 use tracing::instrument;
@@ -14,16 +16,101 @@ use super::SendKind;
 use crate::amount::SplitTarget;
 use crate::fees::calculate_fee;
 use crate::nuts::nut00::ProofsMethods;
-use crate::nuts::{Proofs, SpendingConditions};
+use crate::nuts::{Proofs, SpendingConditions, Token};
 use crate::{Amount, Error, Wallet};
 
-pub mod saga;
+pub(crate) mod saga;
 
-// Re-export saga types for convenience
-pub use saga::SendSaga;
+use saga::SendSaga;
 
-/// Prepared send - type alias to SendSaga in Prepared state for backward compatibility
-pub type PreparedSend = SendSaga<saga::state::Prepared>;
+/// Prepared send transaction
+///
+/// Created by [`Wallet::prepare_send`]. Call [`confirm`](Self::confirm) to complete the send
+/// and create a token, or [`cancel`](Self::cancel) to release reserved proofs.
+pub struct PreparedSend {
+    inner: SendSaga<saga::state::Prepared>,
+}
+
+impl PreparedSend {
+    /// Amount to send
+    pub fn amount(&self) -> Amount {
+        self.inner.amount()
+    }
+
+    /// Send options
+    pub fn options(&self) -> &SendOptions {
+        self.inner.options()
+    }
+
+    /// Proofs that need to be swapped before sending
+    pub fn proofs_to_swap(&self) -> &Proofs {
+        self.inner.proofs_to_swap()
+    }
+
+    /// Fee for the swap operation
+    pub fn swap_fee(&self) -> Amount {
+        self.inner.swap_fee()
+    }
+
+    /// Proofs that will be sent directly
+    pub fn proofs_to_send(&self) -> &Proofs {
+        self.inner.proofs_to_send()
+    }
+
+    /// Fee the recipient will pay to redeem the token
+    pub fn send_fee(&self) -> Amount {
+        self.inner.send_fee()
+    }
+
+    /// All proofs (both to swap and to send)
+    pub fn proofs(&self) -> Proofs {
+        self.inner.proofs()
+    }
+
+    /// Total fee (swap + send)
+    pub fn fee(&self) -> Amount {
+        self.inner.fee()
+    }
+
+    /// Confirm the prepared send and create a token
+    pub async fn confirm(self, memo: Option<SendMemo>) -> Result<Token, Error> {
+        self.inner.confirm(memo).await
+    }
+
+    /// Cancel the prepared send and release reserved proofs
+    pub async fn cancel(self) -> Result<(), Error> {
+        self.inner.cancel().await
+    }
+}
+
+impl Debug for PreparedSend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedSend")
+            .field("amount", &self.inner.amount())
+            .field("options", self.inner.options())
+            .field(
+                "proofs_to_swap",
+                &self
+                    .inner
+                    .proofs_to_swap()
+                    .iter()
+                    .map(|p| p.amount)
+                    .collect::<Vec<_>>(),
+            )
+            .field("swap_fee", &self.inner.swap_fee())
+            .field(
+                "proofs_to_send",
+                &self
+                    .inner
+                    .proofs_to_send()
+                    .iter()
+                    .map(|p| p.amount)
+                    .collect::<Vec<_>>(),
+            )
+            .field("send_fee", &self.inner.send_fee())
+            .finish()
+    }
+}
 
 impl Wallet {
     /// Prepare a send transaction
@@ -50,7 +137,8 @@ impl Wallet {
         opts: SendOptions,
     ) -> Result<PreparedSend, Error> {
         let saga = SendSaga::new(self.clone());
-        saga.prepare(amount, opts).await
+        let inner = saga.prepare(amount, opts).await?;
+        Ok(PreparedSend { inner })
     }
 }
 

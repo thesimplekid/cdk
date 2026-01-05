@@ -81,7 +81,7 @@ pub use payment_request::CreateRequestParams;
 pub use payment_request::NostrWaitInfo;
 pub use receive::{ReceiveOptions, ReceiveSaga};
 pub use recovery::RecoveryReport;
-pub use send::{PreparedSend, SendMemo, SendOptions, SendSaga};
+pub use send::{PreparedSend, SendMemo, SendOptions};
 pub use swap::SwapSaga;
 pub use types::{MeltQuote, MintQuote, SendKind};
 
