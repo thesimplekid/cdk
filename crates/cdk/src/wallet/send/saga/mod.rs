@@ -31,7 +31,7 @@ use cdk_common::Id;
 use tracing::instrument;
 
 use self::compensation::{RevertProofReservation, RevertSwappedProofs};
-use self::state::{Confirmed, Initial, Prepared};
+use self::state::{Initial, Prepared};
 use super::{split_proofs_for_send, SendMemo, SendOptions};
 use crate::amount::SplitTarget;
 use crate::nuts::nut00::ProofsMethods;
@@ -367,9 +367,19 @@ impl SendSaga<Prepared> {
         self.state_data.all_proofs()
     }
 
+    /// Get all proofs (alias for backward compatibility with PreparedSend)
+    pub fn proofs(&self) -> Proofs {
+        self.all_proofs()
+    }
+
     /// Get the total fee
     pub fn total_fee(&self) -> Amount {
         self.state_data.total_fee()
+    }
+
+    /// Get the total fee (alias for backward compatibility with PreparedSend)
+    pub fn fee(&self) -> Amount {
+        self.total_fee()
     }
 
     /// Confirm the prepared send and create a token.
@@ -382,9 +392,9 @@ impl SendSaga<Prepared> {
     /// 5. Recording the transaction
     /// 6. Deleting the saga
     ///
-    /// On success, compensations are cleared.
+    /// On success, compensations are cleared and the token is returned.
     #[instrument(skip_all)]
-    pub async fn confirm(self, memo: Option<SendMemo>) -> Result<SendSaga<Confirmed>, Error> {
+    pub async fn confirm(self, memo: Option<SendMemo>) -> Result<Token, Error> {
         tracing::info!(
             "Confirming prepared send for operation {}",
             self.state_data.operation_id
@@ -557,17 +567,7 @@ impl SendSaga<Prepared> {
             // Don't fail the send if saga deletion fails - orphaned saga is harmless
         }
 
-        // Transition to Confirmed state
-        Ok(SendSaga {
-            wallet: self.wallet,
-            compensations: self.compensations,
-            state_data: Confirmed {
-                operation_id: self.state_data.operation_id,
-                token,
-                amount: self.state_data.amount,
-                fee: total_send_fee,
-            },
-        })
+        Ok(token)
     }
 
     /// Cancel the prepared send and release reserved proofs.
@@ -585,33 +585,6 @@ impl SendSaga<Prepared> {
         execute_compensations(&self.compensations).await?;
 
         Ok(())
-    }
-}
-
-impl SendSaga<Confirmed> {
-    /// Get the created token
-    pub fn token(&self) -> &Token {
-        &self.state_data.token
-    }
-
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
-    /// Get the amount sent
-    pub fn amount(&self) -> Amount {
-        self.state_data.amount
-    }
-
-    /// Get the fee paid
-    pub fn fee(&self) -> Amount {
-        self.state_data.fee
-    }
-
-    /// Consume the saga and return the token
-    pub fn into_token(self) -> Token {
-        self.state_data.token
     }
 }
 

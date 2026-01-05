@@ -6,7 +6,7 @@
 
 use uuid::Uuid;
 
-use crate::nuts::{Proofs, Token};
+use crate::nuts::Proofs;
 use crate::wallet::send::SendOptions;
 use crate::Amount;
 
@@ -53,17 +53,3 @@ impl Prepared {
     }
 }
 
-/// Confirmed state - token has been created.
-///
-/// After successful confirmation, the saga transitions to this state.
-/// The token can be retrieved and the saga is complete.
-pub struct Confirmed {
-    /// Unique operation identifier
-    pub operation_id: Uuid,
-    /// The created token
-    pub token: Token,
-    /// Amount sent
-    pub amount: Amount,
-    /// Total fee paid
-    pub fee: Amount,
-}
