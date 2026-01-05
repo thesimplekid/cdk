@@ -656,216 +656,113 @@ impl MeltSaga<Prepared> {
             ));
         }
 
-        let melt_response = match quote_info.payment_method {
-            cdk_common::PaymentMethod::Bolt11 => {
-                match self.wallet.client.post_melt(request).await {
-                    Ok(response) => response,
-                    Err(e) => {
-                        // Check for known terminal errors first - compensate immediately
-                        if matches!(e, Error::RequestAlreadyPaid) {
-                            tracing::info!(
-                                "Invoice already paid by another wallet - releasing proofs"
-                            );
-                            execute_compensations(&self.compensations).await?;
-                            return Err(e);
-                        }
-
-                        // On HTTP error, check the quote status to determine if payment failed
-                        tracing::warn!(
-                            "Melt request failed with error: {}. Checking quote status...",
-                            e
-                        );
-
-                        // Try to get the actual quote status from the mint
-                        match self.wallet.melt_quote_status(&quote_info.id).await {
-                            Ok(status) => {
-                                match status.state {
-                                    MeltQuoteState::Failed
-                                    | MeltQuoteState::Unknown
-                                    | MeltQuoteState::Unpaid => {
-                                        // Payment definitely failed or never started - release proofs
-                                        tracing::info!(
-                                            "Quote {} status is {:?} - releasing proofs",
-                                            quote_info.id,
-                                            status.state
-                                        );
-                                        execute_compensations(&self.compensations).await?;
-                                        return Err(Error::PaymentFailed);
-                                    }
-                                    MeltQuoteState::Pending => {
-                                        // Payment is in flight - keep proofs pending
-                                        tracing::info!(
-                                            "Quote {} status is Pending - keeping proofs pending",
-                                            quote_info.id
-                                        );
-                                    }
-                                    MeltQuoteState::Paid => {
-                                        // Payment succeeded despite HTTP error - unusual but handle it
-                                        tracing::info!(
-                                            "Quote {} status is Paid despite HTTP error",
-                                            quote_info.id
-                                        );
-                                        // Continue to normal processing would require re-fetching response
-                                        // For now, keep proofs pending and let recovery handle it
-                                    }
-                                }
-                            }
-                            Err(check_err) => {
-                                // Can't check status - keep proofs pending for safety
-                                tracing::warn!(
-                                    "Failed to check quote {} status: {}. Keeping proofs pending.",
-                                    quote_info.id,
-                                    check_err
-                                );
-                            }
-                        }
-
-                        // Update saga state to PaymentPending for recovery
-                        let pending_saga = WalletSaga::new(
-                            operation_id,
-                            WalletSagaState::Melt(MeltSagaState::PaymentPending),
-                            quote_info.amount,
-                            self.wallet.mint_url.clone(),
-                            self.wallet.unit.clone(),
-                            OperationData::Melt(MeltOperationData {
-                                quote_id: quote_info.id.clone(),
-                                amount: quote_info.amount,
-                                fee_reserve: quote_info.fee_reserve,
-                                counter_start: Some(counter_start),
-                                counter_end: Some(counter_end),
-                                change_amount: if change_amount > Amount::ZERO {
-                                    Some(change_amount)
-                                } else {
-                                    None
-                                },
-                                change_blinded_messages: if change_amount > Amount::ZERO {
-                                    Some(premint_secrets.blinded_messages())
-                                } else {
-                                    None
-                                },
-                            }),
-                        );
-
-                        // Update saga state - best effort
-                        if let Err(saga_err) = self.wallet.localstore.update_saga(pending_saga).await
-                        {
-                            tracing::warn!(
-                                "Failed to update saga {} to PaymentPending state: {}",
-                                operation_id,
-                                saga_err
-                            );
-                        }
-
-                        return Err(Error::PaymentPending);
-                    }
-                }
-            }
-            cdk_common::PaymentMethod::Bolt12 => {
-                match self.wallet.client.post_melt_bolt12(request).await {
-                    Ok(response) => response,
-                    Err(e) => {
-                        // Check for known terminal errors first - compensate immediately
-                        if matches!(e, Error::RequestAlreadyPaid) {
-                            tracing::info!(
-                                "Invoice already paid by another wallet - releasing proofs"
-                            );
-                            execute_compensations(&self.compensations).await?;
-                            return Err(e);
-                        }
-
-                        // On HTTP error, check the quote status to determine if payment failed
-                        tracing::warn!(
-                            "Melt request failed with error: {}. Checking quote status...",
-                            e
-                        );
-
-                        // Try to get the actual quote status from the mint
-                        match self.wallet.melt_quote_status(&quote_info.id).await {
-                            Ok(status) => {
-                                match status.state {
-                                    MeltQuoteState::Failed
-                                    | MeltQuoteState::Unknown
-                                    | MeltQuoteState::Unpaid => {
-                                        // Payment definitely failed or never started - release proofs
-                                        tracing::info!(
-                                            "Quote {} status is {:?} - releasing proofs",
-                                            quote_info.id,
-                                            status.state
-                                        );
-                                        execute_compensations(&self.compensations).await?;
-                                        return Err(Error::PaymentFailed);
-                                    }
-                                    MeltQuoteState::Pending => {
-                                        // Payment is in flight - keep proofs pending
-                                        tracing::info!(
-                                            "Quote {} status is Pending - keeping proofs pending",
-                                            quote_info.id
-                                        );
-                                    }
-                                    MeltQuoteState::Paid => {
-                                        // Payment succeeded despite HTTP error - unusual but handle it
-                                        tracing::info!(
-                                            "Quote {} status is Paid despite HTTP error",
-                                            quote_info.id
-                                        );
-                                        // Continue to normal processing would require re-fetching response
-                                        // For now, keep proofs pending and let recovery handle it
-                                    }
-                                }
-                            }
-                            Err(check_err) => {
-                                // Can't check status - keep proofs pending for safety
-                                tracing::warn!(
-                                    "Failed to check quote {} status: {}. Keeping proofs pending.",
-                                    quote_info.id,
-                                    check_err
-                                );
-                            }
-                        }
-
-                        // Update saga state to PaymentPending for recovery
-                        let pending_saga = WalletSaga::new(
-                            operation_id,
-                            WalletSagaState::Melt(MeltSagaState::PaymentPending),
-                            quote_info.amount,
-                            self.wallet.mint_url.clone(),
-                            self.wallet.unit.clone(),
-                            OperationData::Melt(MeltOperationData {
-                                quote_id: quote_info.id.clone(),
-                                amount: quote_info.amount,
-                                fee_reserve: quote_info.fee_reserve,
-                                counter_start: Some(counter_start),
-                                counter_end: Some(counter_end),
-                                change_amount: if change_amount > Amount::ZERO {
-                                    Some(change_amount)
-                                } else {
-                                    None
-                                },
-                                change_blinded_messages: if change_amount > Amount::ZERO {
-                                    Some(premint_secrets.blinded_messages())
-                                } else {
-                                    None
-                                },
-                            }),
-                        );
-
-                        // Update saga state - best effort
-                        if let Err(saga_err) = self.wallet.localstore.update_saga(pending_saga).await
-                        {
-                            tracing::warn!(
-                                "Failed to update saga {} to PaymentPending state: {}",
-                                operation_id,
-                                saga_err
-                            );
-                        }
-
-                        return Err(Error::PaymentPending);
-                    }
-                }
-            }
+        // Make the melt request based on payment method
+        let melt_result = match quote_info.payment_method {
+            cdk_common::PaymentMethod::Bolt11 => self.wallet.client.post_melt(request).await,
+            cdk_common::PaymentMethod::Bolt12 => self.wallet.client.post_melt_bolt12(request).await,
             cdk_common::PaymentMethod::Custom(_) => {
                 execute_compensations(&self.compensations).await?;
                 return Err(Error::UnsupportedPaymentMethod);
+            }
+        };
+
+        // Handle the result - error handling is the same for all payment methods
+        let melt_response = match melt_result {
+            Ok(response) => response,
+            Err(e) => {
+                // Check for known terminal errors first - compensate immediately
+                if matches!(e, Error::RequestAlreadyPaid) {
+                    tracing::info!("Invoice already paid by another wallet - releasing proofs");
+                    execute_compensations(&self.compensations).await?;
+                    return Err(e);
+                }
+
+                // On HTTP error, check the quote status to determine if payment failed
+                tracing::warn!(
+                    "Melt request failed with error: {}. Checking quote status...",
+                    e
+                );
+
+                // Try to get the actual quote status from the mint
+                match self.wallet.melt_quote_status(&quote_info.id).await {
+                    Ok(status) => {
+                        match status.state {
+                            MeltQuoteState::Failed
+                            | MeltQuoteState::Unknown
+                            | MeltQuoteState::Unpaid => {
+                                // Payment definitely failed or never started - release proofs
+                                tracing::info!(
+                                    "Quote {} status is {:?} - releasing proofs",
+                                    quote_info.id,
+                                    status.state
+                                );
+                                execute_compensations(&self.compensations).await?;
+                                return Err(Error::PaymentFailed);
+                            }
+                            MeltQuoteState::Pending => {
+                                // Payment is in flight - keep proofs pending
+                                tracing::info!(
+                                    "Quote {} status is Pending - keeping proofs pending",
+                                    quote_info.id
+                                );
+                            }
+                            MeltQuoteState::Paid => {
+                                // Payment succeeded despite HTTP error - unusual but handle it
+                                tracing::info!(
+                                    "Quote {} status is Paid despite HTTP error",
+                                    quote_info.id
+                                );
+                                // Continue to normal processing would require re-fetching response
+                                // For now, keep proofs pending and let recovery handle it
+                            }
+                        }
+                    }
+                    Err(check_err) => {
+                        // Can't check status - keep proofs pending for safety
+                        tracing::warn!(
+                            "Failed to check quote {} status: {}. Keeping proofs pending.",
+                            quote_info.id,
+                            check_err
+                        );
+                    }
+                }
+
+                // Update saga state to PaymentPending for recovery
+                let pending_saga = WalletSaga::new(
+                    operation_id,
+                    WalletSagaState::Melt(MeltSagaState::PaymentPending),
+                    quote_info.amount,
+                    self.wallet.mint_url.clone(),
+                    self.wallet.unit.clone(),
+                    OperationData::Melt(MeltOperationData {
+                        quote_id: quote_info.id.clone(),
+                        amount: quote_info.amount,
+                        fee_reserve: quote_info.fee_reserve,
+                        counter_start: Some(counter_start),
+                        counter_end: Some(counter_end),
+                        change_amount: if change_amount > Amount::ZERO {
+                            Some(change_amount)
+                        } else {
+                            None
+                        },
+                        change_blinded_messages: if change_amount > Amount::ZERO {
+                            Some(premint_secrets.blinded_messages())
+                        } else {
+                            None
+                        },
+                    }),
+                );
+
+                // Update saga state - best effort
+                if let Err(saga_err) = self.wallet.localstore.update_saga(pending_saga).await {
+                    tracing::warn!(
+                        "Failed to update saga {} to PaymentPending state: {}",
+                        operation_id,
+                        saga_err
+                    );
+                }
+
+                return Err(Error::PaymentPending);
             }
         };
 
