@@ -373,7 +373,8 @@ where
                 secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                used_by_operation
             FROM
                 mint_quote
             WHERE

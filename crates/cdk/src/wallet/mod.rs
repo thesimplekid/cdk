@@ -67,7 +67,7 @@ pub use auth::{AuthMintConnector, AuthWallet};
 pub use builder::WalletBuilder;
 pub use cdk_common::wallet as types;
 pub use issue::MintSaga;
-pub use melt::MeltSaga;
+pub use melt::{MeltSaga, PreparedMelt};
 #[cfg(feature = "auth")]
 pub use mint_connector::http_client::AuthHttpClient as BaseAuthHttpClient;
 pub use mint_connector::http_client::HttpClient as BaseHttpClient;

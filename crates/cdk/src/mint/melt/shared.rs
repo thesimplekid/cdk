@@ -304,7 +304,7 @@ pub async fn load_melt_quotes_exclusively(
             quote.id,
             quote.request_lookup_id,
         );
-        return Err(Error::Database(crate::cdk_database::Error::Duplicate));
+        return Err(Error::RequestAlreadyPaid);
     }
 
     Ok(quote)

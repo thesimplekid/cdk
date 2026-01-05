@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use cdk_common::MeltQuoteState;
 use uuid::Uuid;
 
 use crate::nuts::Proofs;
@@ -48,17 +49,22 @@ impl Prepared {
     }
 }
 
-/// Confirmed state - melt has been completed.
+/// Confirmed state - melt has been completed (or is pending).
 ///
-/// After successful confirmation, the saga transitions to this state.
+/// After confirmation attempt, the saga transitions to this state.
+/// The `state` field indicates whether payment is Paid, Pending, etc.
 /// The result can be retrieved and the saga is complete.
 pub struct Confirmed {
     /// Unique operation identifier
     pub operation_id: Uuid,
+    /// The actual state of the melt (Paid, Pending, etc.)
+    pub state: MeltQuoteState,
     /// Amount melted
     pub amount: Amount,
     /// Total fee paid
     pub fee: Amount,
     /// Payment preimage (if available)
     pub payment_preimage: Option<String>,
+    /// Change proofs returned from the melt (if any)
+    pub change: Option<Proofs>,
 }
