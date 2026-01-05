@@ -7,11 +7,11 @@
 use uuid::Uuid;
 
 use crate::nuts::{Id, PaymentMethod, PreMintSecrets, Proofs};
+use crate::wallet::MintQuote;
+use crate::Amount;
 
 /// Type alias for MintRequest with String quote ID
 pub type MintRequestString = crate::nuts::MintRequest<String>;
-use crate::wallet::MintQuote;
-use crate::Amount;
 
 /// Initial state - operation ID assigned but no work done yet.
 ///
@@ -49,10 +49,6 @@ pub struct Prepared {
 /// After successful execution, the saga transitions to this state.
 /// The minted proofs can be retrieved and the saga is complete.
 pub struct Finalized {
-    /// Unique operation identifier
-    pub operation_id: Uuid,
     /// Minted proofs
     pub proofs: Proofs,
-    /// Amount minted
-    pub amount: Amount,
 }

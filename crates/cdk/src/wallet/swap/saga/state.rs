@@ -7,7 +7,7 @@
 use uuid::Uuid;
 
 use crate::amount::SplitTarget;
-use crate::nuts::{Id, PreSwap, Proofs, PublicKey, SpendingConditions};
+use crate::nuts::{PreSwap, Proofs, PublicKey, SpendingConditions};
 use crate::Amount;
 
 /// Initial state - operation ID assigned but no work done yet.
@@ -35,14 +35,10 @@ pub struct Prepared {
     pub input_ys: Vec<PublicKey>,
     /// Spending conditions for output proofs
     pub spending_conditions: Option<SpendingConditions>,
-    /// Whether to include fees in the output
-    pub include_fees: bool,
     /// Pre-swap data (request and secrets)
     pub pre_swap: PreSwap,
     /// Fee paid for the swap
     pub fee: Amount,
-    /// Keyset ID used for swap
-    pub keyset_id: Id,
     /// Counter start (for recovery)
     pub counter_start: u32,
     /// Counter end (for recovery)
@@ -54,10 +50,6 @@ pub struct Prepared {
 /// After successful execution, the saga transitions to this state.
 /// The output proofs can be retrieved and the saga is complete.
 pub struct Finalized {
-    /// Unique operation identifier
-    pub operation_id: Uuid,
     /// Output proofs to send (if amount was specified)
     pub send_proofs: Option<Proofs>,
-    /// Fee paid for the swap
-    pub fee: Amount,
 }

@@ -31,7 +31,6 @@ use crate::util::unix_time;
 use crate::wallet::saga::{
     add_compensation, clear_compensations, new_compensations, Compensations,
 };
-use crate::wallet::MintQuote;
 use crate::{Amount, Error, Wallet};
 
 pub mod compensation;
@@ -432,26 +431,6 @@ impl MintSaga<Initial> {
 }
 
 impl MintSaga<Prepared> {
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
-    /// Get the quote ID
-    pub fn quote_id(&self) -> &str {
-        &self.state_data.quote_id
-    }
-
-    /// Get the amount being minted
-    pub fn amount(&self) -> Amount {
-        self.state_data.amount
-    }
-
-    /// Get the quote info
-    pub fn quote_info(&self) -> &MintQuote {
-        &self.state_data.quote_info
-    }
-
     /// Execute the mint operation.
     ///
     /// This completes the mint by:
@@ -641,31 +620,12 @@ impl MintSaga<Prepared> {
         Ok(MintSaga {
             wallet: self.wallet,
             compensations: self.compensations,
-            state_data: Finalized {
-                operation_id: self.state_data.operation_id,
-                proofs,
-                amount: minted_amount,
-            },
+            state_data: Finalized { proofs },
         })
     }
 }
 
 impl MintSaga<Finalized> {
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
-    /// Get the minted proofs
-    pub fn proofs(&self) -> &Proofs {
-        &self.state_data.proofs
-    }
-
-    /// Get the minted amount
-    pub fn amount(&self) -> Amount {
-        self.state_data.amount
-    }
-
     /// Consume the saga and return the minted proofs
     pub fn into_proofs(self) -> Proofs {
         self.state_data.proofs

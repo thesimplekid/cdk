@@ -186,21 +186,6 @@ impl ReceiveSaga<Initial> {
 }
 
 impl ReceiveSaga<Validated> {
-    /// Get the proofs that will be received
-    pub fn proofs(&self) -> &Proofs {
-        &self.state_data.proofs
-    }
-
-    /// Get the total amount of incoming proofs
-    pub fn proofs_amount(&self) -> Amount {
-        self.state_data.proofs_amount
-    }
-
-    /// Get the options
-    pub fn options(&self) -> &ReceiveOptions {
-        &self.state_data.options
-    }
-
     /// Execute the receive operation.
     ///
     /// This completes the receive by:
@@ -441,9 +426,7 @@ impl ReceiveSaga<Validated> {
             wallet: self.wallet,
             compensations: self.compensations,
             state_data: Finalized {
-                operation_id: self.state_data.operation_id,
                 amount: total_amount,
-                fee,
             },
         })
     }
@@ -474,21 +457,6 @@ impl ReceiveSaga<Validated> {
 }
 
 impl ReceiveSaga<Finalized> {
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
-    /// Get the amount received
-    pub fn amount(&self) -> Amount {
-        self.state_data.amount
-    }
-
-    /// Get the fee paid
-    pub fn fee(&self) -> Amount {
-        self.state_data.fee
-    }
-
     /// Consume the saga and return the received amount
     pub fn into_amount(self) -> Amount {
         self.state_data.amount

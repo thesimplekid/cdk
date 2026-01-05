@@ -1063,7 +1063,6 @@ impl MeltSaga<Prepared> {
             wallet: self.wallet,
             compensations: self.compensations,
             state_data: Confirmed {
-                operation_id: self.state_data.operation_id,
                 state: melt_response.state,
                 amount: melted.amount,
                 fee: melted.fee_paid,
@@ -1091,11 +1090,6 @@ impl MeltSaga<Prepared> {
 }
 
 impl MeltSaga<Confirmed> {
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
     /// Get the state of the melt (Paid, Pending, etc.)
     pub fn state(&self) -> MeltQuoteState {
         self.state_data.state

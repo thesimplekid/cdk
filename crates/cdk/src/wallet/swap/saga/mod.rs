@@ -172,10 +172,8 @@ impl SwapSaga<Initial> {
                 input_proofs,
                 input_ys,
                 spending_conditions,
-                include_fees,
                 pre_swap,
                 fee,
-                keyset_id: active_keyset_id,
                 counter_start,
                 counter_end,
             },
@@ -184,21 +182,6 @@ impl SwapSaga<Initial> {
 }
 
 impl SwapSaga<Prepared> {
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
-    /// Get the input proofs
-    pub fn input_proofs(&self) -> &Proofs {
-        &self.state_data.input_proofs
-    }
-
-    /// Get the fee
-    pub fn fee(&self) -> Amount {
-        self.state_data.fee
-    }
-
     /// Execute the swap operation.
     ///
     /// This completes the swap by:
@@ -375,48 +358,13 @@ impl SwapSaga<Prepared> {
         Ok(SwapSaga {
             wallet: self.wallet,
             compensations: self.compensations,
-            state_data: Finalized {
-                operation_id: self.state_data.operation_id,
-                send_proofs,
-                fee: self.state_data.fee,
-            },
+            state_data: Finalized { send_proofs },
         })
     }
 
-    /// Cancel the prepared swap and release reserved proofs.
-    ///
-    /// This rolls back the swap operation by executing all registered
-    /// compensating actions in reverse order.
-    #[instrument(skip_all)]
-    pub async fn cancel(self) -> Result<(), Error> {
-        tracing::info!(
-            "Cancelling swap for operation {}",
-            self.state_data.operation_id
-        );
-
-        // Execute compensations (which will revert proof reservation)
-        execute_compensations(&self.compensations).await?;
-
-        Ok(())
-    }
 }
 
 impl SwapSaga<Finalized> {
-    /// Get the operation ID
-    pub fn operation_id(&self) -> uuid::Uuid {
-        self.state_data.operation_id
-    }
-
-    /// Get the output proofs to send (if amount was specified)
-    pub fn send_proofs(&self) -> Option<&Proofs> {
-        self.state_data.send_proofs.as_ref()
-    }
-
-    /// Get the fee paid
-    pub fn fee(&self) -> Amount {
-        self.state_data.fee
-    }
-
     /// Consume the saga and return the send proofs
     pub fn into_send_proofs(self) -> Option<Proofs> {
         self.state_data.send_proofs

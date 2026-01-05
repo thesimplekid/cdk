@@ -42,10 +42,6 @@ pub struct Validated {
 /// After successful execution, the saga transitions to this state.
 /// The received amount can be retrieved and the saga is complete.
 pub struct Finalized {
-    /// Unique operation identifier
-    pub operation_id: Uuid,
     /// Total amount received (after fees)
     pub amount: Amount,
-    /// Fee paid for the swap
-    pub fee: Amount,
 }

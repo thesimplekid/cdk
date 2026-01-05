@@ -55,8 +55,6 @@ impl Prepared {
 /// The `state` field indicates whether payment is Paid, Pending, etc.
 /// The result can be retrieved and the saga is complete.
 pub struct Confirmed {
-    /// Unique operation identifier
-    pub operation_id: Uuid,
     /// The actual state of the melt (Paid, Pending, etc.)
     pub state: MeltQuoteState,
     /// Amount melted
