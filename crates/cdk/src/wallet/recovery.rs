@@ -1681,4 +1681,588 @@ mod tests {
         let retrieved_quote = db.get_mint_quote(&quote.id).await.unwrap().unwrap();
         assert!(retrieved_quote.used_by_operation.is_none());
     }
+
+    // =========================================================================
+    // Mock MintConnector for "Requested States" Recovery Tests
+    // =========================================================================
+
+    use std::sync::Mutex;
+
+    use cdk_common::nuts::{
+        CheckStateResponse, KeysetResponse, MeltQuoteBolt11Response, MintQuoteBolt11Request,
+        MintQuoteBolt11Response, MintRequest, MintResponse, ProofState, RestoreResponse,
+        SwapRequest, SwapResponse,
+    };
+    use cdk_common::{MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response};
+
+    use crate::nuts::{CheckStateRequest, MeltQuoteBolt11Request, MeltRequest, RestoreRequest};
+    use crate::wallet::MintConnector;
+
+    /// Mock MintConnector for testing recovery scenarios
+    #[derive(Debug)]
+    struct MockMintConnector {
+        /// Response for post_check_state calls
+        check_state_response: Mutex<Option<Result<CheckStateResponse, Error>>>,
+        /// Response for post_restore calls
+        restore_response: Mutex<Option<Result<RestoreResponse, Error>>>,
+        /// Response for get_melt_quote_status calls
+        melt_quote_status_response: Mutex<Option<Result<MeltQuoteBolt11Response<String>, Error>>>,
+    }
+
+    impl MockMintConnector {
+        fn new() -> Self {
+            Self {
+                check_state_response: Mutex::new(None),
+                restore_response: Mutex::new(None),
+                melt_quote_status_response: Mutex::new(None),
+            }
+        }
+
+        fn set_check_state_response(&self, response: Result<CheckStateResponse, Error>) {
+            *self.check_state_response.lock().unwrap() = Some(response);
+        }
+
+        fn set_restore_response(&self, response: Result<RestoreResponse, Error>) {
+            *self.restore_response.lock().unwrap() = Some(response);
+        }
+
+        fn set_melt_quote_status_response(
+            &self,
+            response: Result<MeltQuoteBolt11Response<String>, Error>,
+        ) {
+            *self.melt_quote_status_response.lock().unwrap() = Some(response);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl MintConnector for MockMintConnector {
+        #[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
+        async fn resolve_dns_txt(&self, _domain: &str) -> Result<Vec<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn fetch_lnurl_pay_request(
+            &self,
+            _url: &str,
+        ) -> Result<crate::lightning_address::LnurlPayResponse, Error> {
+            unimplemented!()
+        }
+
+        async fn fetch_lnurl_invoice(
+            &self,
+            _url: &str,
+        ) -> Result<crate::lightning_address::LnurlPayInvoiceResponse, Error> {
+            unimplemented!()
+        }
+
+        async fn get_mint_keys(&self) -> Result<Vec<crate::nuts::KeySet>, Error> {
+            unimplemented!()
+        }
+
+        async fn get_mint_keyset(&self, _keyset_id: Id) -> Result<crate::nuts::KeySet, Error> {
+            unimplemented!()
+        }
+
+        async fn get_mint_keysets(&self) -> Result<KeysetResponse, Error> {
+            unimplemented!()
+        }
+
+        async fn post_mint_quote(
+            &self,
+            _request: MintQuoteBolt11Request,
+        ) -> Result<MintQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn get_mint_quote_status(
+            &self,
+            _quote_id: &str,
+        ) -> Result<MintQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn post_mint(&self, _request: MintRequest<String>) -> Result<MintResponse, Error> {
+            unimplemented!()
+        }
+
+        async fn post_melt_quote(
+            &self,
+            _request: MeltQuoteBolt11Request,
+        ) -> Result<MeltQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn get_melt_quote_status(
+            &self,
+            _quote_id: &str,
+        ) -> Result<MeltQuoteBolt11Response<String>, Error> {
+            self.melt_quote_status_response
+                .lock()
+                .unwrap()
+                .take()
+                .expect("MockMintConnector: get_melt_quote_status called without configured response")
+        }
+
+        async fn post_melt(
+            &self,
+            _request: MeltRequest<String>,
+        ) -> Result<MeltQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn post_swap(&self, _request: SwapRequest) -> Result<SwapResponse, Error> {
+            unimplemented!()
+        }
+
+        async fn get_mint_info(&self) -> Result<crate::nuts::MintInfo, Error> {
+            unimplemented!()
+        }
+
+        async fn post_check_state(
+            &self,
+            _request: CheckStateRequest,
+        ) -> Result<CheckStateResponse, Error> {
+            self.check_state_response
+                .lock()
+                .unwrap()
+                .take()
+                .expect("MockMintConnector: post_check_state called without configured response")
+        }
+
+        async fn post_restore(&self, _request: RestoreRequest) -> Result<RestoreResponse, Error> {
+            self.restore_response
+                .lock()
+                .unwrap()
+                .take()
+                .expect("MockMintConnector: post_restore called without configured response")
+        }
+
+        #[cfg(feature = "auth")]
+        async fn get_auth_wallet(&self) -> Option<crate::wallet::AuthWallet> {
+            None
+        }
+
+        #[cfg(feature = "auth")]
+        async fn set_auth_wallet(&self, _wallet: Option<crate::wallet::AuthWallet>) {}
+
+        async fn post_mint_bolt12_quote(
+            &self,
+            _request: MintQuoteBolt12Request,
+        ) -> Result<MintQuoteBolt12Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn get_mint_quote_bolt12_status(
+            &self,
+            _quote_id: &str,
+        ) -> Result<MintQuoteBolt12Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn post_melt_bolt12_quote(
+            &self,
+            _request: MeltQuoteBolt12Request,
+        ) -> Result<MeltQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn get_melt_bolt12_quote_status(
+            &self,
+            _quote_id: &str,
+        ) -> Result<MeltQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+
+        async fn post_melt_bolt12(
+            &self,
+            _request: MeltRequest<String>,
+        ) -> Result<MeltQuoteBolt11Response<String>, Error> {
+            unimplemented!()
+        }
+    }
+
+    /// Create a test wallet with a mock client
+    async fn create_test_wallet_with_mock(
+        db: Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>,
+        mock_client: Arc<MockMintConnector>,
+    ) -> Wallet {
+        let seed = Mnemonic::generate(12).unwrap().to_seed_normalized("");
+
+        crate::wallet::WalletBuilder::new()
+            .mint_url(test_mint_url())
+            .unit(CurrencyUnit::Sat)
+            .localstore(db)
+            .seed(seed)
+            .shared_client(mock_client)
+            .build()
+            .unwrap()
+    }
+
+    // =========================================================================
+    // "Requested States" Recovery Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_recover_swap_requested_proofs_not_spent() {
+        // When proofs are NOT spent, the swap failed - should compensate
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create saga in SwapRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Swap(SwapSagaState::SwapRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Swap(SwapOperationData {
+                input_amount: Amount::from(100),
+                output_amount: Amount::from(90),
+                counter_start: Some(0),
+                counter_end: Some(10),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: proofs are NOT spent (swap failed)
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_check_state_response(Ok(CheckStateResponse {
+            states: vec![ProofState {
+                y: proof_y,
+                state: State::Unspent, // NOT spent - swap failed
+                witness: None,
+            }],
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should compensate (proofs not spent means swap failed)
+        assert_eq!(report.compensated, 1);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should be released back to Unspent
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Saga should be deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_swap_requested_mint_unreachable() {
+        // When mint is unreachable, should skip (retry later)
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create saga in SwapRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Swap(SwapSagaState::SwapRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Swap(SwapOperationData {
+                input_amount: Amount::from(100),
+                output_amount: Amount::from(90),
+                counter_start: Some(0),
+                counter_end: Some(10),
+                blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: mint is unreachable
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_check_state_response(Err(Error::Custom("Connection refused".to_string())));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should skip (mint unreachable, retry later)
+        assert_eq!(report.skipped, 1);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should still be reserved
+        let reserved = db.get_reserved_proofs(&saga_id).await.unwrap();
+        assert_eq!(reserved.len(), 1);
+
+        // Saga should still exist
+        assert!(db.get_saga(&saga_id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_quote_failed() {
+        // When melt quote failed, should compensate
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        // Create saga in MeltRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: quote is Failed
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_melt_quote_status_response(Ok(MeltQuoteBolt11Response {
+            quote: quote_id.clone(),
+            amount: Amount::from(100),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Failed,
+            expiry: 9999999999,
+            payment_preimage: None,
+            change: None,
+            request: None,
+            unit: None,
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should compensate (quote failed)
+        assert_eq!(report.compensated, 1);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should be released
+        let proofs = db
+            .get_proofs(None, None, Some(vec![State::Unspent]), None)
+            .await
+            .unwrap();
+        assert_eq!(proofs.len(), 1);
+
+        // Melt quote reservation should be released
+        let retrieved_quote = db.get_melt_quote(&quote_id).await.unwrap().unwrap();
+        assert!(retrieved_quote.used_by_operation.is_none());
+
+        // Saga should be deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_quote_pending() {
+        // When melt quote is still pending, should skip
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        // Create saga in MeltRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: quote is still Pending
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_melt_quote_status_response(Ok(MeltQuoteBolt11Response {
+            quote: quote_id.clone(),
+            amount: Amount::from(100),
+            fee_reserve: Amount::from(10),
+            state: MeltQuoteState::Pending,
+            expiry: 9999999999,
+            payment_preimage: None,
+            change: None,
+            request: None,
+            unit: None,
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should skip (quote still pending, wait for resolution)
+        assert_eq!(report.skipped, 1);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.recovered, 0);
+
+        // Proofs should still be reserved
+        let reserved = db.get_reserved_proofs(&saga_id).await.unwrap();
+        assert_eq!(reserved.len(), 1);
+
+        // Saga should still exist
+        assert!(db.get_saga(&saga_id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_recover_melt_requested_mint_unreachable() {
+        // When mint is unreachable during melt recovery, should skip
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create a melt quote
+        let mut quote = test_melt_quote();
+        quote.used_by_operation = Some(saga_id.to_string());
+        let quote_id = quote.id.clone();
+        db.add_melt_quote(quote).await.unwrap();
+
+        // Create saga in MeltRequested state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Melt(MeltSagaState::MeltRequested),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Melt(MeltOperationData {
+                quote_id: quote_id.clone(),
+                amount: Amount::from(100),
+                fee_reserve: Amount::from(10),
+                counter_start: None,
+                counter_end: None,
+                change_amount: None,
+                change_blinded_messages: None,
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: mint is unreachable
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client
+            .set_melt_quote_status_response(Err(Error::Custom("Connection refused".to_string())));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should skip (mint unreachable)
+        assert_eq!(report.skipped, 1);
+        assert_eq!(report.compensated, 0);
+        assert_eq!(report.recovered, 0);
+
+        // Saga should still exist for retry
+        assert!(db.get_saga(&saga_id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_recover_send_token_created_proofs_not_spent() {
+        // When send token was created but proofs are not spent,
+        // leave proofs in current state (token may still be redeemed)
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let saga_id = uuid::Uuid::new_v4();
+
+        // Create and reserve proofs
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+        db.reserve_proofs(vec![proof_y], &saga_id).await.unwrap();
+
+        // Create saga in TokenCreated state
+        let saga = WalletSaga::new(
+            saga_id,
+            WalletSagaState::Send(SendSagaState::TokenCreated),
+            Amount::from(100),
+            mint_url.clone(),
+            CurrencyUnit::Sat,
+            OperationData::Send(SendOperationData {
+                amount: Amount::from(100),
+                memo: None,
+                counter_start: None,
+                counter_end: None,
+                token: Some("cashuA...".to_string()),
+            }),
+        );
+        db.add_saga(saga).await.unwrap();
+
+        // Mock: proofs are NOT spent (token not redeemed yet)
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.set_check_state_response(Ok(CheckStateResponse {
+            states: vec![ProofState {
+                y: proof_y,
+                state: State::Unspent,
+                witness: None,
+            }],
+        }));
+
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+        let report = wallet.recover_incomplete_sagas().await.unwrap();
+
+        // Should recover (cleanup saga, leave proofs as-is for potential token redemption)
+        assert_eq!(report.recovered, 1);
+        assert_eq!(report.compensated, 0);
+
+        // Saga should be deleted
+        assert!(db.get_saga(&saga_id).await.unwrap().is_none());
+    }
 }
