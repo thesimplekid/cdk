@@ -11,9 +11,9 @@ use crate::amount::SplitTarget;
 use crate::nuts::{Proofs, SecretKey, Token};
 use crate::{ensure_cdk, Amount, Error, Wallet};
 
-pub mod saga;
+pub(crate) mod saga;
 
-pub use saga::ReceiveSaga;
+use saga::ReceiveSaga;
 
 /// Receive options
 #[derive(Debug, Clone, Default)]

@@ -4,6 +4,6 @@
 
 mod issue_bolt11;
 mod issue_bolt12;
-pub mod saga;
+pub(crate) mod saga;
 
-pub use saga::MintSaga;
+pub(crate) use saga::MintSaga;

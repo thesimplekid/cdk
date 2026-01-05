@@ -53,7 +53,7 @@ mod proofs;
 mod receive;
 mod reclaim;
 mod recovery;
-pub mod saga;
+pub(crate) mod saga;
 mod send;
 #[cfg(not(target_arch = "wasm32"))]
 mod streams;
@@ -66,8 +66,7 @@ pub mod util;
 pub use auth::{AuthMintConnector, AuthWallet};
 pub use builder::WalletBuilder;
 pub use cdk_common::wallet as types;
-pub use issue::MintSaga;
-pub use melt::{MeltSaga, PreparedMelt};
+pub use melt::{ConfirmedMelt, PreparedMelt};
 #[cfg(feature = "auth")]
 pub use mint_connector::http_client::AuthHttpClient as BaseAuthHttpClient;
 pub use mint_connector::http_client::HttpClient as BaseHttpClient;
@@ -79,10 +78,9 @@ pub use multi_mint_wallet::{MultiMintReceiveOptions, MultiMintSendOptions, Multi
 pub use payment_request::CreateRequestParams;
 #[cfg(feature = "nostr")]
 pub use payment_request::NostrWaitInfo;
-pub use receive::{ReceiveOptions, ReceiveSaga};
+pub use receive::ReceiveOptions;
 pub use recovery::RecoveryReport;
 pub use send::{PreparedSend, SendMemo, SendOptions};
-pub use swap::SwapSaga;
 pub use types::{MeltQuote, MintQuote, SendKind};
 
 use crate::nuts::nut00::ProofsMethods;

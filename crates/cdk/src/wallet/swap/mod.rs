@@ -15,9 +15,9 @@ use crate::nuts::{
 };
 use crate::{ensure_cdk, Amount, Error, Wallet};
 
-pub mod saga;
+pub(crate) mod saga;
 
-pub use saga::SwapSaga;
+use saga::SwapSaga;
 
 impl Wallet {
     /// Swap proofs using the saga pattern

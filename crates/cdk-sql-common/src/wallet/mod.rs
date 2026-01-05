@@ -1262,13 +1262,10 @@ where
         .fetch_all(&*conn)
         .await?;
 
-        if rows.is_empty() {
-            return Ok(None);
+        match rows.into_iter().next() {
+            Some(row) => Ok(Some(sql_row_to_wallet_saga(row)?)),
+            None => Ok(None),
         }
-
-        Ok(Some(sql_row_to_wallet_saga(
-            rows.into_iter().next().unwrap(),
-        )?))
     }
 
     #[instrument(skip(self))]

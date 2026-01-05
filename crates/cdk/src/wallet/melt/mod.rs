@@ -1,11 +1,6 @@
 //! Melt Module
 //!
-//! This module provides the melt functionality for the wallet, including:
-//! - Standard melt operations for Bolt11 and Bolt12 payments
-//! - `MeltSaga` - The type state pattern implementation for melt operations
-//!
-//! The `MeltSaga` provides compile-time safety for state transitions and automatic
-//! compensation on failure.
+//! This module provides the melt functionality for the wallet.
 //!
 //! # Usage
 //!
@@ -38,14 +33,16 @@
 //! ```
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use cdk_common::util::unix_time;
 use cdk_common::wallet::{MeltQuote, Transaction, TransactionDirection};
 use cdk_common::{Error, MeltQuoteBolt11Response, MeltQuoteState, ProofsMethods, State};
 use tracing::instrument;
 
+use crate::nuts::Proofs;
 use crate::types::Melted;
-use crate::Wallet;
+use crate::{Amount, Wallet};
 
 #[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
 mod melt_bip353;
@@ -53,18 +50,123 @@ mod melt_bolt11;
 mod melt_bolt12;
 #[cfg(feature = "wallet")]
 mod melt_lightning_address;
-pub mod saga;
+pub(crate) mod saga;
 
-// Re-export saga types for convenience
-pub use saga::MeltSaga;
+use saga::MeltSaga;
 
 /// A prepared melt operation that can be confirmed or cancelled.
 ///
-/// This is the result of calling `wallet.prepare_melt()`. The proofs are reserved
+/// This is the result of calling [`Wallet::prepare_melt`]. The proofs are reserved
 /// but the payment has not yet been executed.
 ///
-/// Call `confirm()` to execute the melt, or `cancel()` to release the reserved proofs.
-pub type PreparedMelt = MeltSaga<saga::state::Prepared>;
+/// Call [`confirm`](Self::confirm) to execute the melt, or [`cancel`](Self::cancel)
+/// to release the reserved proofs.
+pub struct PreparedMelt {
+    inner: MeltSaga<saga::state::Prepared>,
+}
+
+impl PreparedMelt {
+    /// Get the quote
+    pub fn quote(&self) -> &MeltQuote {
+        self.inner.quote()
+    }
+
+    /// Get the amount to be melted
+    pub fn amount(&self) -> Amount {
+        self.inner.amount()
+    }
+
+    /// Get the proofs that will be used
+    pub fn proofs(&self) -> &Proofs {
+        self.inner.proofs()
+    }
+
+    /// Get the proofs that need to be swapped
+    pub fn proofs_to_swap(&self) -> &Proofs {
+        self.inner.proofs_to_swap()
+    }
+
+    /// Get the swap fee
+    pub fn swap_fee(&self) -> Amount {
+        self.inner.swap_fee()
+    }
+
+    /// Get the input fee
+    pub fn input_fee(&self) -> Amount {
+        self.inner.input_fee()
+    }
+
+    /// Get the total fee
+    pub fn total_fee(&self) -> Amount {
+        self.inner.total_fee()
+    }
+
+    /// Confirm the prepared melt and execute the payment
+    pub async fn confirm(self) -> Result<ConfirmedMelt, Error> {
+        let inner = self.inner.confirm().await?;
+        Ok(ConfirmedMelt { inner })
+    }
+
+    /// Cancel the prepared melt and release reserved proofs
+    pub async fn cancel(self) -> Result<(), Error> {
+        self.inner.cancel().await
+    }
+}
+
+impl Debug for PreparedMelt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedMelt")
+            .field("quote_id", &self.inner.quote().id)
+            .field("amount", &self.inner.amount())
+            .field("total_fee", &self.inner.total_fee())
+            .finish()
+    }
+}
+
+/// A confirmed melt operation.
+///
+/// This is the result of calling [`PreparedMelt::confirm`]. The payment has been
+/// executed (or is pending).
+pub struct ConfirmedMelt {
+    inner: MeltSaga<saga::state::Confirmed>,
+}
+
+impl ConfirmedMelt {
+    /// Get the state of the melt (Paid, Pending, etc.)
+    pub fn state(&self) -> MeltQuoteState {
+        self.inner.state()
+    }
+
+    /// Get the amount melted
+    pub fn amount(&self) -> Amount {
+        self.inner.amount()
+    }
+
+    /// Get the fee paid
+    pub fn fee(&self) -> Amount {
+        self.inner.fee()
+    }
+
+    /// Get the payment preimage
+    pub fn payment_preimage(&self) -> Option<&String> {
+        self.inner.payment_preimage()
+    }
+
+    /// Get the change proofs returned from the melt
+    pub fn change(&self) -> Option<&Proofs> {
+        self.inner.change()
+    }
+}
+
+impl Debug for ConfirmedMelt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfirmedMelt")
+            .field("state", &self.inner.state())
+            .field("amount", &self.inner.amount())
+            .field("fee", &self.inner.fee())
+            .finish()
+    }
+}
 
 impl Wallet {
     /// Prepare a melt operation without executing it.
@@ -99,7 +201,10 @@ impl Wallet {
         quote_id: &str,
         metadata: HashMap<String, String>,
     ) -> Result<PreparedMelt, Error> {
-        MeltSaga::new(self.clone()).prepare(quote_id, metadata).await
+        let inner = MeltSaga::new(self.clone())
+            .prepare(quote_id, metadata)
+            .await?;
+        Ok(PreparedMelt { inner })
     }
 
     /// Melt tokens to pay a Lightning invoice.
@@ -174,9 +279,10 @@ impl Wallet {
         proofs: crate::nuts::Proofs,
         metadata: HashMap<String, String>,
     ) -> Result<PreparedMelt, Error> {
-        MeltSaga::new(self.clone())
+        let inner = MeltSaga::new(self.clone())
             .prepare_with_proofs(quote_id, proofs, metadata)
-            .await
+            .await?;
+        Ok(PreparedMelt { inner })
     }
 
     /// Melt specific proofs to pay a Lightning invoice.
