@@ -4,7 +4,7 @@
 //! to undo all completed steps and restore the database to its pre-saga state.
 
 // Re-export shared compensation actions used by send saga
-pub use crate::wallet::saga::{RevertProofReservation, RevertSwappedProofs};
+pub use crate::wallet::saga::RevertProofReservation;
 
 #[cfg(test)]
 mod tests {
@@ -126,75 +126,6 @@ mod tests {
             localstore: db.clone(),
             proof_ys: vec![proof_y_1],
             saga_id,
-        };
-        compensation.execute().await.unwrap();
-
-        // First proof should be Unspent
-        let unspent = db
-            .get_proofs(None, None, Some(vec![State::Unspent]), None)
-            .await
-            .unwrap();
-        assert_eq!(unspent.len(), 1);
-        assert_eq!(unspent[0].y, proof_y_1);
-
-        // Second proof should still be Reserved
-        let reserved = db
-            .get_proofs(None, None, Some(vec![State::Reserved]), None)
-            .await
-            .unwrap();
-        assert_eq!(reserved.len(), 1);
-        assert_eq!(reserved[0].y, proof_y_2);
-    }
-
-    // =========================================================================
-    // RevertSwappedProofs Tests
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_revert_swapped_proofs_is_idempotent() {
-        let db = create_test_db().await;
-        let mint_url = test_mint_url();
-        let keyset_id = test_keyset_id();
-
-        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone(), State::Reserved);
-        let proof_y = proof_info.y;
-        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
-
-        let compensation = RevertSwappedProofs {
-            localstore: db.clone(),
-            proof_ys: vec![proof_y],
-        };
-
-        // Execute twice
-        compensation.execute().await.unwrap();
-        compensation.execute().await.unwrap();
-
-        let proofs = db
-            .get_proofs(None, None, Some(vec![State::Unspent]), None)
-            .await
-            .unwrap();
-        assert_eq!(proofs.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_revert_swapped_proofs_only_affects_specified_proofs() {
-        let db = create_test_db().await;
-        let mint_url = test_mint_url();
-        let keyset_id = test_keyset_id();
-
-        // Create two reserved proofs
-        let proof_info_1 = test_proof_info(keyset_id, 100, mint_url.clone(), State::Reserved);
-        let proof_info_2 = test_proof_info(keyset_id, 200, mint_url.clone(), State::Reserved);
-        let proof_y_1 = proof_info_1.y;
-        let proof_y_2 = proof_info_2.y;
-        db.update_proofs(vec![proof_info_1, proof_info_2], vec![])
-            .await
-            .unwrap();
-
-        // Only revert the first proof
-        let compensation = RevertSwappedProofs {
-            localstore: db.clone(),
-            proof_ys: vec![proof_y_1],
         };
         compensation.execute().await.unwrap();
 

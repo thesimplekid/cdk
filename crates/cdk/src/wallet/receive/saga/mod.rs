@@ -45,18 +45,18 @@ pub mod state;
 /// Uses the typestate pattern to enforce valid state transitions at compile-time.
 /// Each state (Initial, Validated, Finalized) is a distinct type, and operations
 /// are only available on the appropriate type.
-pub struct ReceiveSaga<S> {
+pub struct ReceiveSaga<'a, S> {
     /// Wallet reference
-    wallet: Wallet,
+    wallet: &'a Wallet,
     /// Compensating actions in LIFO order (most recent first)
     compensations: Compensations,
     /// State-specific data
     state_data: S,
 }
 
-impl ReceiveSaga<Initial> {
+impl<'a> ReceiveSaga<'a, Initial> {
     /// Create a new receive saga in the Initial state.
-    pub fn new(wallet: Wallet) -> Self {
+    pub fn new(wallet: &'a Wallet) -> Self {
         let operation_id = uuid::Uuid::new_v4();
 
         Self {
@@ -82,7 +82,7 @@ impl ReceiveSaga<Initial> {
         proofs: Proofs,
         opts: ReceiveOptions,
         memo: Option<String>,
-    ) -> Result<ReceiveSaga<Validated>, Error> {
+    ) -> Result<ReceiveSaga<'a, Validated>, Error> {
         tracing::info!(
             "Validating receive for {} proofs with operation {}",
             proofs.len(),
@@ -185,7 +185,7 @@ impl ReceiveSaga<Initial> {
     }
 }
 
-impl ReceiveSaga<Validated> {
+impl<'a> ReceiveSaga<'a, Validated> {
     /// Execute the receive operation.
     ///
     /// This completes the receive by:
@@ -199,7 +199,7 @@ impl ReceiveSaga<Validated> {
     /// Registers a compensation action that will remove pending proofs
     /// if the swap fails.
     #[instrument(skip_all)]
-    pub async fn execute(self) -> Result<ReceiveSaga<Finalized>, Error> {
+    pub async fn execute(self) -> Result<ReceiveSaga<'a, Finalized>, Error> {
         tracing::info!(
             "Executing receive for operation {}",
             self.state_data.operation_id
@@ -456,7 +456,7 @@ impl ReceiveSaga<Validated> {
     }
 }
 
-impl ReceiveSaga<Finalized> {
+impl<'a> ReceiveSaga<'a, Finalized> {
     /// Consume the saga and return the received amount
     pub fn into_amount(self) -> Amount {
         self.state_data.amount

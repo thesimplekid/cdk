@@ -43,18 +43,18 @@ pub mod state;
 /// Uses the typestate pattern to enforce valid state transitions at compile-time.
 /// Each state (Initial, Prepared, Finalized) is a distinct type, and operations
 /// are only available on the appropriate type.
-pub struct SwapSaga<S> {
+pub struct SwapSaga<'a, S> {
     /// Wallet reference
-    wallet: Wallet,
+    wallet: &'a Wallet,
     /// Compensating actions in LIFO order (most recent first)
     compensations: Compensations,
     /// State-specific data
     state_data: S,
 }
 
-impl SwapSaga<Initial> {
+impl<'a> SwapSaga<'a, Initial> {
     /// Create a new swap saga in the Initial state.
-    pub fn new(wallet: Wallet) -> Self {
+    pub fn new(wallet: &'a Wallet) -> Self {
         let operation_id = uuid::Uuid::new_v4();
 
         Self {
@@ -84,7 +84,7 @@ impl SwapSaga<Initial> {
         input_proofs: Proofs,
         spending_conditions: Option<SpendingConditions>,
         include_fees: bool,
-    ) -> Result<SwapSaga<Prepared>, Error> {
+    ) -> Result<SwapSaga<'a, Prepared>, Error> {
         tracing::info!(
             "Preparing swap with operation {}",
             self.state_data.operation_id
@@ -181,7 +181,7 @@ impl SwapSaga<Initial> {
     }
 }
 
-impl SwapSaga<Prepared> {
+impl<'a> SwapSaga<'a, Prepared> {
     /// Execute the swap operation.
     ///
     /// This completes the swap by:
@@ -193,7 +193,7 @@ impl SwapSaga<Prepared> {
     ///
     /// On success, compensations are cleared.
     #[instrument(skip_all)]
-    pub async fn execute(self) -> Result<SwapSaga<Finalized>, Error> {
+    pub async fn execute(self) -> Result<SwapSaga<'a, Finalized>, Error> {
         tracing::info!(
             "Executing swap for operation {}",
             self.state_data.operation_id
@@ -364,7 +364,7 @@ impl SwapSaga<Prepared> {
 
 }
 
-impl SwapSaga<Finalized> {
+impl<'a> SwapSaga<'a, Finalized> {
     /// Consume the saga and return the send proofs
     pub fn into_send_proofs(self) -> Option<Proofs> {
         self.state_data.send_proofs

@@ -14,7 +14,7 @@ use crate::wallet::saga::CompensatingAction;
 use crate::Error;
 
 // Re-export shared compensation actions used by melt saga
-pub use crate::wallet::saga::{RevertProofReservation, RevertSwappedProofs};
+pub use crate::wallet::saga::RevertProofReservation;
 
 /// Compensation action to release a melt quote reservation.
 ///
@@ -156,36 +156,6 @@ mod tests {
         compensation.execute().await.unwrap();
 
         // Proof should be Unspent
-        let proofs = db
-            .get_proofs(None, None, Some(vec![State::Unspent]), None)
-            .await
-            .unwrap();
-        assert_eq!(proofs.len(), 1);
-    }
-
-    // =========================================================================
-    // RevertSwappedProofs Tests
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_revert_swapped_proofs_is_idempotent() {
-        let db = create_test_db().await;
-        let mint_url = test_mint_url();
-        let keyset_id = test_keyset_id();
-
-        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone(), State::Reserved);
-        let proof_y = proof_info.y;
-        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
-
-        let compensation = RevertSwappedProofs {
-            localstore: db.clone(),
-            proof_ys: vec![proof_y],
-        };
-
-        // Execute twice
-        compensation.execute().await.unwrap();
-        compensation.execute().await.unwrap();
-
         let proofs = db
             .get_proofs(None, None, Some(vec![State::Unspent]), None)
             .await

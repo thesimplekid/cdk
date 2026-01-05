@@ -214,7 +214,7 @@ impl Wallet {
         amount_split_target: SplitTarget,
         spending_conditions: Option<SpendingConditions>,
     ) -> Result<Proofs, Error> {
-        let saga = MintSaga::new(self.clone());
+        let saga = MintSaga::new(self);
         let saga = saga
             .prepare_bolt11(quote_id, amount_split_target, spending_conditions)
             .await?;

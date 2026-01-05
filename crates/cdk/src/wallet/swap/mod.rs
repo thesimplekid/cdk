@@ -32,7 +32,7 @@ impl Wallet {
     ) -> Result<Option<Proofs>, Error> {
         tracing::info!("Swapping");
 
-        let saga = SwapSaga::new(self.clone());
+        let saga = SwapSaga::new(self);
         let saga = saga
             .prepare(
                 amount,

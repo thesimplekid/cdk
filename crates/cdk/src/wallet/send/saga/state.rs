@@ -39,17 +39,4 @@ pub struct Prepared {
     pub send_fee: Amount,
 }
 
-impl Prepared {
-    /// Get all proofs (both to swap and to send)
-    pub fn all_proofs(&self) -> Proofs {
-        let mut proofs = self.proofs_to_swap.clone();
-        proofs.extend(self.proofs_to_send.clone());
-        proofs
-    }
-
-    /// Total fee (swap + send)
-    pub fn total_fee(&self) -> Amount {
-        self.swap_fee + self.send_fee
-    }
-}
 

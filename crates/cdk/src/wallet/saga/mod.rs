@@ -139,43 +139,6 @@ impl CompensatingAction for RevertProofReservation {
     }
 }
 
-/// Compensation action to revert swapped proofs.
-///
-/// This compensation is used when a saga fails after a nested swap has succeeded.
-/// The swap created new proofs that need to be released back to Unspent state.
-/// Unlike RevertProofReservation, this does NOT delete the saga (that's handled
-/// separately).
-///
-/// Used by: send and melt sagas.
-pub struct RevertSwappedProofs {
-    /// Database reference
-    pub localstore: Arc<dyn WalletDatabase<database::Error> + Send + Sync>,
-    /// Y values (public keys) of the swapped proofs
-    pub proof_ys: Vec<PublicKey>,
-}
-
-#[async_trait]
-impl CompensatingAction for RevertSwappedProofs {
-    #[instrument(skip_all)]
-    async fn execute(&self) -> Result<(), Error> {
-        tracing::info!(
-            "Compensation: Reverting {} swapped proofs to Unspent",
-            self.proof_ys.len()
-        );
-
-        self.localstore
-            .update_proofs_state(self.proof_ys.clone(), State::Unspent)
-            .await
-            .map_err(Error::Database)?;
-
-        Ok(())
-    }
-
-    fn name(&self) -> &'static str {
-        "RevertSwappedProofs"
-    }
-}
-
 /// Test utilities shared across wallet saga compensation tests.
 #[cfg(test)]
 pub mod test_utils {

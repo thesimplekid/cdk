@@ -179,7 +179,7 @@ impl Wallet {
             .inner
             .prepare_send(amount.into(), options.into())
             .await?;
-        Ok(std::sync::Arc::new(prepared.into()))
+        Ok(std::sync::Arc::new(PreparedSend::new(self.inner.clone(), &prepared)))
     }
 
     /// Get a mint quote

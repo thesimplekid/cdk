@@ -41,18 +41,18 @@ pub mod state;
 /// Uses the typestate pattern to enforce valid state transitions at compile-time.
 /// Each state (Initial, Prepared, Finalized) is a distinct type, and operations
 /// are only available on the appropriate type.
-pub struct MintSaga<S> {
+pub struct MintSaga<'a, S> {
     /// Wallet reference
-    wallet: Wallet,
+    wallet: &'a Wallet,
     /// Compensating actions in LIFO order (most recent first)
     compensations: Compensations,
     /// State-specific data
     state_data: S,
 }
 
-impl MintSaga<Initial> {
+impl<'a> MintSaga<'a, Initial> {
     /// Create a new mint saga in the Initial state.
-    pub fn new(wallet: Wallet) -> Self {
+    pub fn new(wallet: &'a Wallet) -> Self {
         let operation_id = uuid::Uuid::new_v4();
 
         Self {
@@ -74,7 +74,7 @@ impl MintSaga<Initial> {
         quote_id: &str,
         amount_split_target: SplitTarget,
         spending_conditions: Option<SpendingConditions>,
-    ) -> Result<MintSaga<Prepared>, Error> {
+    ) -> Result<MintSaga<'a, Prepared>, Error> {
         tracing::info!(
             "Preparing bolt11 mint for quote {} with operation {}",
             quote_id,
@@ -252,7 +252,7 @@ impl MintSaga<Initial> {
         amount: Option<Amount>,
         amount_split_target: SplitTarget,
         spending_conditions: Option<SpendingConditions>,
-    ) -> Result<MintSaga<Prepared>, Error> {
+    ) -> Result<MintSaga<'a, Prepared>, Error> {
         tracing::info!(
             "Preparing bolt12 mint for quote {} with operation {}",
             quote_id,
@@ -430,7 +430,7 @@ impl MintSaga<Initial> {
     }
 }
 
-impl MintSaga<Prepared> {
+impl<'a> MintSaga<'a, Prepared> {
     /// Execute the mint operation.
     ///
     /// This completes the mint by:
@@ -443,7 +443,7 @@ impl MintSaga<Prepared> {
     ///
     /// On success, compensations are cleared.
     #[instrument(skip_all)]
-    pub async fn execute(self) -> Result<MintSaga<Finalized>, Error> {
+    pub async fn execute(self) -> Result<MintSaga<'a, Finalized>, Error> {
         tracing::info!(
             "Executing mint for quote {} with operation {}",
             self.state_data.quote_id,
@@ -625,7 +625,7 @@ impl MintSaga<Prepared> {
     }
 }
 
-impl MintSaga<Finalized> {
+impl<'a> MintSaga<'a, Finalized> {
     /// Consume the saga and return the minted proofs
     pub fn into_proofs(self) -> Proofs {
         self.state_data.proofs

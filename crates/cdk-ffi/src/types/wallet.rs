@@ -1,7 +1,6 @@
 //! Wallet-related FFI types
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -298,38 +297,52 @@ pub fn encode_receive_options(options: ReceiveOptions) -> Result<String, FfiErro
 }
 
 /// FFI-compatible PreparedSend
-#[derive(Debug, uniffi::Object)]
+///
+/// This wraps the data from a prepared send operation along with a reference
+/// to the wallet. The actual PreparedSend<'a> from cdk has a lifetime parameter
+/// that doesn't work with FFI, so we store the wallet and cached data separately.
+#[derive(uniffi::Object)]
 pub struct PreparedSend {
-    inner: Mutex<Option<cdk::wallet::PreparedSend>>,
-    id: String,
+    wallet: std::sync::Arc<cdk::Wallet>,
+    operation_id: uuid::Uuid,
     amount: Amount,
-    proofs: Proofs,
+    options: cdk::wallet::SendOptions,
+    proofs_to_swap: cdk::nuts::Proofs,
+    proofs_to_send: cdk::nuts::Proofs,
+    swap_fee: Amount,
+    send_fee: Amount,
 }
 
-impl From<cdk::wallet::PreparedSend> for PreparedSend {
-    fn from(prepared: cdk::wallet::PreparedSend) -> Self {
-        let id = format!("{:?}", prepared); // Use debug format as ID
-        let amount = prepared.amount().into();
-        let proofs = prepared
-            .proofs()
-            .iter()
-            .cloned()
-            .map(|p| p.into())
-            .collect();
+impl std::fmt::Debug for PreparedSend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedSend")
+            .field("operation_id", &self.operation_id)
+            .field("amount", &self.amount)
+            .finish()
+    }
+}
+
+impl PreparedSend {
+    /// Create a new FFI PreparedSend from a cdk::wallet::PreparedSend and wallet
+    pub fn new(wallet: std::sync::Arc<cdk::Wallet>, prepared: &cdk::wallet::PreparedSend<'_>) -> Self {
         Self {
-            inner: Mutex::new(Some(prepared)),
-            id,
-            amount,
-            proofs,
+            wallet,
+            operation_id: prepared.operation_id(),
+            amount: prepared.amount().into(),
+            options: prepared.options().clone(),
+            proofs_to_swap: prepared.proofs_to_swap().clone(),
+            proofs_to_send: prepared.proofs_to_send().clone(),
+            swap_fee: prepared.swap_fee().into(),
+            send_fee: prepared.send_fee().into(),
         }
     }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
 impl PreparedSend {
-    /// Get the prepared send ID
-    pub fn id(&self) -> String {
-        self.id.clone()
+    /// Get the operation ID for this prepared send
+    pub fn operation_id(&self) -> String {
+        self.operation_id.to_string()
     }
 
     /// Get the amount to send
@@ -339,68 +352,43 @@ impl PreparedSend {
 
     /// Get the proofs that will be used
     pub fn proofs(&self) -> Proofs {
-        self.proofs.clone()
+        let mut all_proofs: Vec<_> = self.proofs_to_swap.iter().cloned().map(|p| p.into()).collect();
+        all_proofs.extend(self.proofs_to_send.iter().cloned().map(|p| p.into()));
+        all_proofs
     }
 
     /// Get the total fee for this send operation
     pub fn fee(&self) -> Amount {
-        if let Ok(guard) = self.inner.lock() {
-            if let Some(ref inner) = *guard {
-                inner.fee().into()
-            } else {
-                Amount::new(0)
-            }
-        } else {
-            Amount::new(0)
-        }
+        Amount::new(self.swap_fee.value + self.send_fee.value)
     }
 
     /// Confirm the prepared send and create a token
     pub async fn confirm(
-        self: std::sync::Arc<Self>,
+        &self,
         memo: Option<String>,
     ) -> Result<Token, FfiError> {
-        let inner = {
-            if let Ok(mut guard) = self.inner.lock() {
-                guard.take()
-            } else {
-                return Err(FfiError::Generic {
-                    msg: "Failed to acquire lock on PreparedSend".to_string(),
-                });
-            }
-        };
-
-        if let Some(inner) = inner {
-            let send_memo = memo.map(|m| cdk::wallet::SendMemo::for_token(&m));
-            let token = inner.confirm(send_memo).await?;
-            Ok(token.into())
-        } else {
-            Err(FfiError::Generic {
-                msg: "PreparedSend has already been consumed or cancelled".to_string(),
-            })
-        }
+        let send_memo = memo.map(|m| cdk::wallet::SendMemo::for_token(&m));
+        let token = self.wallet.confirm_send(
+            self.operation_id,
+            self.amount.into(),
+            self.options.clone(),
+            self.proofs_to_swap.clone(),
+            self.proofs_to_send.clone(),
+            self.swap_fee.into(),
+            self.send_fee.into(),
+            send_memo,
+        ).await?;
+        Ok(token.into())
     }
 
     /// Cancel the prepared send operation
-    pub async fn cancel(self: std::sync::Arc<Self>) -> Result<(), FfiError> {
-        let inner = {
-            if let Ok(mut guard) = self.inner.lock() {
-                guard.take()
-            } else {
-                return Err(FfiError::Generic {
-                    msg: "Failed to acquire lock on PreparedSend".to_string(),
-                });
-            }
-        };
-
-        if let Some(inner) = inner {
-            inner.cancel().await?;
-            Ok(())
-        } else {
-            Err(FfiError::Generic {
-                msg: "PreparedSend has already been consumed or cancelled".to_string(),
-            })
-        }
+    pub async fn cancel(&self) -> Result<(), FfiError> {
+        self.wallet.cancel_send(
+            self.operation_id,
+            self.proofs_to_swap.clone(),
+            self.proofs_to_send.clone(),
+        ).await?;
+        Ok(())
     }
 }
 

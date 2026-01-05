@@ -291,19 +291,22 @@ impl MultiMintWallet {
         Ok(amount.into())
     }
 
-    /// Prepare a send operation from a specific mint
-    pub async fn prepare_send(
+    /// Send tokens from a specific mint
+    ///
+    /// This method prepares and confirms the send in one step.
+    /// For more control over the send process, use the single-mint Wallet.
+    pub async fn send(
         &self,
         mint_url: MintUrl,
         amount: Amount,
         options: MultiMintSendOptions,
-    ) -> Result<Arc<PreparedSend>, FfiError> {
+    ) -> Result<Token, FfiError> {
         let cdk_mint_url: cdk::mint_url::MintUrl = mint_url.try_into()?;
-        let prepared = self
+        let token = self
             .inner
-            .prepare_send(cdk_mint_url, amount.into(), options.into())
+            .send(cdk_mint_url, amount.into(), options.into())
             .await?;
-        Ok(Arc::new(prepared.into()))
+        Ok(token.into())
     }
 
     /// Get a mint quote from a specific mint
@@ -637,7 +640,7 @@ impl MultiMintWallet {
         let wallets = self.inner.get_wallets().await;
         wallets
             .into_iter()
-            .map(|w| Arc::new(crate::wallet::Wallet::from_inner(Arc::new(w))))
+            .map(|w| Arc::new(crate::wallet::Wallet::from_inner(w)))
             .collect()
     }
 
@@ -645,9 +648,7 @@ impl MultiMintWallet {
     pub async fn get_wallet(&self, mint_url: MintUrl) -> Option<Arc<crate::wallet::Wallet>> {
         let cdk_mint_url: cdk::mint_url::MintUrl = mint_url.try_into().ok()?;
         let wallet = self.inner.get_wallet(&cdk_mint_url).await?;
-        Some(Arc::new(crate::wallet::Wallet::from_inner(Arc::new(
-            wallet,
-        ))))
+        Some(Arc::new(crate::wallet::Wallet::from_inner(wallet)))
     }
 
     /// Verify token DLEQ proofs
