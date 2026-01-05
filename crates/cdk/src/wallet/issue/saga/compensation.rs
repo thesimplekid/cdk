@@ -103,9 +103,6 @@ impl CompensatingAction for MintCompensation {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use cdk_common::database::WalletDatabase;
     use cdk_common::nuts::CurrencyUnit;
     use cdk_common::wallet::{
         MintQuote, OperationData, SwapOperationData, SwapSagaState, WalletSaga, WalletSagaState,
@@ -113,20 +110,11 @@ mod tests {
     use cdk_common::{Amount, PaymentMethod};
 
     use super::*;
+    use crate::wallet::saga::test_utils::*;
+    use crate::wallet::saga::CompensatingAction;
 
-    /// Create test database
-    async fn create_test_db() -> Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>
-    {
-        Arc::new(cdk_sqlite::wallet::memory::empty().await.unwrap())
-    }
-
-    /// Create a test mint URL
-    fn test_mint_url() -> cdk_common::mint_url::MintUrl {
-        cdk_common::mint_url::MintUrl::from_str("https://test-mint.example.com").unwrap()
-    }
-
-    /// Create a test wallet saga
-    fn test_wallet_saga(mint_url: cdk_common::mint_url::MintUrl) -> WalletSaga {
+    /// Create a test wallet saga for issue operations
+    fn test_issue_saga(mint_url: cdk_common::mint_url::MintUrl) -> WalletSaga {
         WalletSaga::new(
             uuid::Uuid::new_v4(),
             WalletSagaState::Swap(SwapSagaState::ProofsReserved),
@@ -209,7 +197,7 @@ mod tests {
         let db = create_test_db().await;
         let mint_url = test_mint_url();
 
-        let saga = test_wallet_saga(mint_url);
+        let saga = test_issue_saga(mint_url);
         let saga_id = saga.id;
         db.add_saga(saga).await.unwrap();
 

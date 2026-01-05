@@ -176,6 +176,59 @@ impl CompensatingAction for RevertSwappedProofs {
     }
 }
 
+/// Test utilities shared across wallet saga compensation tests.
+#[cfg(test)]
+pub mod test_utils {
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use cdk_common::database::WalletDatabase;
+    use cdk_common::nuts::{CurrencyUnit, Id, Proof, State};
+    use cdk_common::secret::Secret;
+    use cdk_common::{Amount, SecretKey};
+
+    use crate::types::ProofInfo;
+
+    /// Create an in-memory test database
+    pub async fn create_test_db(
+    ) -> Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync> {
+        Arc::new(cdk_sqlite::wallet::memory::empty().await.unwrap())
+    }
+
+    /// Create a test keyset ID
+    pub fn test_keyset_id() -> Id {
+        Id::from_str("00916bbf7ef91a36").unwrap()
+    }
+
+    /// Create a test mint URL
+    pub fn test_mint_url() -> cdk_common::mint_url::MintUrl {
+        cdk_common::mint_url::MintUrl::from_str("https://test-mint.example.com").unwrap()
+    }
+
+    /// Create a test proof with the given keyset ID and amount
+    pub fn test_proof(keyset_id: Id, amount: u64) -> Proof {
+        Proof {
+            amount: Amount::from(amount),
+            keyset_id,
+            secret: Secret::generate(),
+            c: SecretKey::generate().public_key(),
+            witness: None,
+            dleq: None,
+        }
+    }
+
+    /// Create a test proof info with the given parameters
+    pub fn test_proof_info(
+        keyset_id: Id,
+        amount: u64,
+        mint_url: cdk_common::mint_url::MintUrl,
+        state: State,
+    ) -> ProofInfo {
+        let proof = test_proof(keyset_id, amount);
+        ProofInfo::new(proof, mint_url, state, CurrencyUnit::Sat).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

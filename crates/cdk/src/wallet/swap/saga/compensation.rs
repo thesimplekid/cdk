@@ -9,60 +9,18 @@ pub use crate::wallet::saga::RevertProofReservation as RevertSwapProofReservatio
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-    use std::sync::Arc;
-
-    use cdk_common::database::WalletDatabase;
-    use cdk_common::nuts::{CurrencyUnit, Id, Proof, State};
-    use cdk_common::secret::Secret;
+    use cdk_common::nuts::{CurrencyUnit, State};
     use cdk_common::wallet::{
         OperationData, SwapOperationData, SwapSagaState, WalletSaga, WalletSagaState,
     };
-    use cdk_common::{Amount, SecretKey};
+    use cdk_common::Amount;
 
     use super::*;
+    use crate::wallet::saga::test_utils::*;
     use crate::wallet::saga::CompensatingAction;
 
-    /// Create test database
-    async fn create_test_db() -> Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>
-    {
-        Arc::new(cdk_sqlite::wallet::memory::empty().await.unwrap())
-    }
-
-    /// Create a test keyset ID
-    fn test_keyset_id() -> Id {
-        Id::from_str("00916bbf7ef91a36").unwrap()
-    }
-
-    /// Create a test proof
-    fn test_proof(keyset_id: Id, amount: u64) -> Proof {
-        Proof {
-            amount: Amount::from(amount),
-            keyset_id,
-            secret: Secret::generate(),
-            c: SecretKey::generate().public_key(),
-            witness: None,
-            dleq: None,
-        }
-    }
-
-    /// Create a test proof info
-    fn test_proof_info(
-        keyset_id: Id,
-        amount: u64,
-        mint_url: cdk_common::mint_url::MintUrl,
-    ) -> crate::types::ProofInfo {
-        let proof = test_proof(keyset_id, amount);
-        crate::types::ProofInfo::new(proof, mint_url, State::Reserved, CurrencyUnit::Sat).unwrap()
-    }
-
-    /// Create a test mint URL
-    fn test_mint_url() -> cdk_common::mint_url::MintUrl {
-        cdk_common::mint_url::MintUrl::from_str("https://test-mint.example.com").unwrap()
-    }
-
-    /// Create a test wallet saga
-    fn test_wallet_saga(mint_url: cdk_common::mint_url::MintUrl) -> WalletSaga {
+    /// Create a test wallet saga for swap operations
+    fn test_swap_saga(mint_url: cdk_common::mint_url::MintUrl) -> WalletSaga {
         WalletSaga::new(
             uuid::Uuid::new_v4(),
             WalletSagaState::Swap(SwapSagaState::ProofsReserved),
@@ -85,11 +43,11 @@ mod tests {
         let mint_url = test_mint_url();
         let keyset_id = test_keyset_id();
 
-        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone(), State::Reserved);
         let proof_y = proof_info.y;
         db.update_proofs(vec![proof_info], vec![]).await.unwrap();
 
-        let saga = test_wallet_saga(mint_url);
+        let saga = test_swap_saga(mint_url);
         let saga_id = saga.id;
         db.add_saga(saga).await.unwrap();
 
@@ -117,7 +75,7 @@ mod tests {
         let mint_url = test_mint_url();
         let keyset_id = test_keyset_id();
 
-        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone());
+        let proof_info = test_proof_info(keyset_id, 100, mint_url.clone(), State::Reserved);
         let proof_y = proof_info.y;
         db.update_proofs(vec![proof_info], vec![]).await.unwrap();
 
@@ -148,15 +106,15 @@ mod tests {
         let keyset_id = test_keyset_id();
 
         // Create two reserved proofs
-        let proof_info_1 = test_proof_info(keyset_id, 100, mint_url.clone());
-        let proof_info_2 = test_proof_info(keyset_id, 200, mint_url.clone());
+        let proof_info_1 = test_proof_info(keyset_id, 100, mint_url.clone(), State::Reserved);
+        let proof_info_2 = test_proof_info(keyset_id, 200, mint_url.clone(), State::Reserved);
         let proof_y_1 = proof_info_1.y;
         let proof_y_2 = proof_info_2.y;
         db.update_proofs(vec![proof_info_1, proof_info_2], vec![])
             .await
             .unwrap();
 
-        let saga = test_wallet_saga(mint_url);
+        let saga = test_swap_saga(mint_url);
         let saga_id = saga.id;
         db.add_saga(saga).await.unwrap();
 
