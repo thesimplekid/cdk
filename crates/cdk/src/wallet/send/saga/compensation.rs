@@ -3,99 +3,13 @@
 //! When a saga step fails, compensating actions are executed in reverse order (LIFO)
 //! to undo all completed steps and restore the database to its pre-saga state.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use cdk_common::database::{self, WalletDatabase};
-use tracing::instrument;
-
-use crate::nuts::{PublicKey, State};
-use crate::wallet::saga::CompensatingAction;
-use crate::Error;
-
-/// Compensation action to revert proof reservation.
-///
-/// This compensation is used when send fails after proofs have been reserved.
-/// It sets the proofs back to Unspent state and deletes the saga record.
-pub struct RevertProofReservation {
-    /// Database reference
-    pub localstore: Arc<dyn WalletDatabase<database::Error> + Send + Sync>,
-    /// Y values (public keys) of the reserved proofs
-    pub proof_ys: Vec<PublicKey>,
-    /// Saga ID for cleanup
-    pub saga_id: uuid::Uuid,
-}
-
-/// Compensation action to revert swapped proofs.
-///
-/// This compensation is used when send fails after a nested swap has succeeded.
-/// The swap created new proofs that need to be released back to Unspent state.
-/// Unlike RevertProofReservation, this does NOT delete the saga (that's handled
-/// by RevertProofReservation).
-pub struct RevertSwappedProofs {
-    /// Database reference
-    pub localstore: Arc<dyn WalletDatabase<database::Error> + Send + Sync>,
-    /// Y values (public keys) of the swapped proofs
-    pub proof_ys: Vec<PublicKey>,
-}
-
-#[async_trait]
-impl CompensatingAction for RevertProofReservation {
-    #[instrument(skip_all)]
-    async fn execute(&self) -> Result<(), Error> {
-        tracing::info!(
-            "Compensation: Reverting {} proofs from Reserved to Unspent",
-            self.proof_ys.len()
-        );
-
-        self.localstore
-            .update_proofs_state(self.proof_ys.clone(), State::Unspent)
-            .await
-            .map_err(Error::Database)?;
-
-        // Delete saga record (best-effort)
-        if let Err(e) = self.localstore.delete_saga(&self.saga_id).await {
-            tracing::warn!(
-                "Compensation: Failed to delete saga {}: {}. Will be cleaned up on recovery.",
-                self.saga_id,
-                e
-            );
-            // Don't fail compensation if saga deletion fails - orphaned saga is harmless
-        }
-
-        Ok(())
-    }
-
-    fn name(&self) -> &'static str {
-        "RevertProofReservation"
-    }
-}
-
-#[async_trait]
-impl CompensatingAction for RevertSwappedProofs {
-    #[instrument(skip_all)]
-    async fn execute(&self) -> Result<(), Error> {
-        tracing::info!(
-            "Compensation: Reverting {} swapped proofs to Unspent",
-            self.proof_ys.len()
-        );
-
-        self.localstore
-            .update_proofs_state(self.proof_ys.clone(), State::Unspent)
-            .await
-            .map_err(Error::Database)?;
-
-        Ok(())
-    }
-
-    fn name(&self) -> &'static str {
-        "RevertSwappedProofs"
-    }
-}
+// Re-export shared compensation actions used by send saga
+pub use crate::wallet::saga::{RevertProofReservation, RevertSwappedProofs};
 
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use cdk_common::database::WalletDatabase;
     use cdk_common::nuts::{CurrencyUnit, Id, Proof, State};
@@ -106,6 +20,7 @@ mod tests {
     use cdk_common::{Amount, SecretKey};
 
     use super::*;
+    use crate::wallet::saga::CompensatingAction;
 
     /// Create test database
     async fn create_test_db() -> Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>
