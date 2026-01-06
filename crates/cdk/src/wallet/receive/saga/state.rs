@@ -3,6 +3,15 @@
 //! Each state is a distinct type that holds the data relevant to that stage
 //! of the receive operation. The type state pattern ensures that only valid
 //! operations are available at each stage.
+//!
+//! # Type State Flow
+//!
+//! ```text
+//! Initial
+//!   └─> prepare() -> Prepared
+//!                      └─> execute() -> Finalized
+//!                                         └─> amount(), into_amount()
+//! ```
 
 use uuid::Uuid;
 
@@ -12,17 +21,17 @@ use crate::Amount;
 
 /// Initial state - operation ID assigned but no work done yet.
 ///
-/// The receive saga starts in this state. Only `validate()` is available.
+/// The receive saga starts in this state. Only `prepare()` is available.
 pub struct Initial {
     /// Unique operation identifier for tracking and crash recovery
     pub operation_id: Uuid,
 }
 
-/// Validated state - token has been parsed and proofs extracted.
+/// Prepared state - token has been parsed and proofs extracted.
 ///
-/// After successful validation, the saga transitions to this state.
+/// After successful preparation, the saga transitions to this state.
 /// Methods available: `execute()`
-pub struct Validated {
+pub struct Prepared {
     /// Unique operation identifier
     pub operation_id: Uuid,
     /// Options for the receive operation

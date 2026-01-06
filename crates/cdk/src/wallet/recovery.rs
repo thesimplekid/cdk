@@ -45,6 +45,10 @@ use tracing::instrument;
 use crate::dhke::construct_proofs;
 use crate::nuts::{CheckStateRequest, PreMintSecrets, RestoreRequest, State};
 use crate::types::ProofInfo;
+use crate::wallet::issue::saga::compensation::ReleaseMintQuote;
+use crate::wallet::melt::saga::compensation::ReleaseMeltQuote;
+use crate::wallet::receive::saga::compensation::RemovePendingProofs;
+use crate::wallet::saga::{CompensatingAction, RevertProofReservation};
 use crate::{Error, Wallet};
 
 /// Parameters for recovering outputs using stored blinded messages.
@@ -244,21 +248,20 @@ impl Wallet {
     }
 
     /// Compensate a swap saga by releasing reserved proofs and deleting the saga.
+    ///
+    /// Delegates to the shared `RevertProofReservation` compensation action.
     #[instrument(skip(self))]
     async fn compensate_swap_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Release proofs reserved by this operation
-        if let Err(e) = self.localstore.release_proofs(saga_id).await {
-            tracing::warn!(
-                "Failed to release proofs for saga {}: {}. Continuing with saga cleanup.",
-                saga_id,
-                e
-            );
+        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
+        let proof_ys = reserved_proofs.iter().map(|p| p.y).collect();
+
+        RevertProofReservation {
+            localstore: self.localstore.clone(),
+            proof_ys,
+            saga_id: *saga_id,
         }
-
-        // Delete the saga record
-        self.localstore.delete_saga(saga_id).await?;
-
-        Ok(())
+        .execute()
+        .await
     }
 
     /// Recover swap outputs using stored blinded messages.
@@ -664,17 +667,20 @@ impl Wallet {
     }
 
     /// Compensate a receive saga by removing pending proofs and deleting the saga.
+    ///
+    /// Delegates to the `RemovePendingProofs` compensation action.
     #[instrument(skip(self))]
     async fn compensate_receive_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Remove pending proofs for this specific operation
         let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        if !pending_proofs.is_empty() {
-            let proof_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
-            self.localstore.update_proofs(vec![], proof_ys).await?;
-        }
+        let proof_ys = pending_proofs.iter().map(|p| p.y).collect();
 
-        self.localstore.delete_saga(saga_id).await?;
-        Ok(())
+        RemovePendingProofs {
+            localstore: self.localstore.clone(),
+            proof_ys,
+            saga_id: *saga_id,
+        }
+        .execute()
+        .await
     }
 
     /// Recover receive outputs using stored blinded messages.
@@ -779,8 +785,14 @@ impl Wallet {
                     saga_id
                 );
 
-                // Release the mint quote reservation
-                if let Err(e) = self.localstore.release_mint_quote(saga_id).await {
+                // Release the mint quote reservation (best-effort, continue on error)
+                if let Err(e) = (ReleaseMintQuote {
+                    localstore: self.localstore.clone(),
+                    operation_id: *saga_id,
+                }
+                .execute()
+                .await)
+                {
                     tracing::warn!(
                         "Failed to release mint quote for saga {}: {}. Continuing with saga cleanup.",
                         saga_id,
@@ -1091,35 +1103,35 @@ impl Wallet {
     }
 
     /// Generic compensation for sagas with reserved proofs.
+    ///
+    /// Delegates to the shared `RevertProofReservation` compensation action.
     #[instrument(skip(self))]
     async fn compensate_proofs_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Release proofs reserved by this operation
-        if let Err(e) = self.localstore.release_proofs(saga_id).await {
-            tracing::warn!(
-                "Failed to release proofs for saga {}: {}. Continuing with saga cleanup.",
-                saga_id,
-                e
-            );
-        }
+        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
+        let proof_ys = reserved_proofs.iter().map(|p| p.y).collect();
 
-        self.localstore.delete_saga(saga_id).await?;
-        Ok(())
+        RevertProofReservation {
+            localstore: self.localstore.clone(),
+            proof_ys,
+            saga_id: *saga_id,
+        }
+        .execute()
+        .await
     }
 
     /// Compensation for melt sagas - releases both proofs and the melt quote.
+    ///
+    /// Delegates to `ReleaseMeltQuote` and `RevertProofReservation` compensation actions.
     #[instrument(skip(self))]
     async fn compensate_melt_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Release proofs reserved by this operation
-        if let Err(e) = self.localstore.release_proofs(saga_id).await {
-            tracing::warn!(
-                "Failed to release proofs for saga {}: {}. Continuing with saga cleanup.",
-                saga_id,
-                e
-            );
+        // Release melt quote (best-effort, continue on error)
+        if let Err(e) = (ReleaseMeltQuote {
+            localstore: self.localstore.clone(),
+            operation_id: *saga_id,
         }
-
-        // Release the melt quote reservation
-        if let Err(e) = self.localstore.release_melt_quote(saga_id).await {
+        .execute()
+        .await)
+        {
             tracing::warn!(
                 "Failed to release melt quote for saga {}: {}. Continuing with saga cleanup.",
                 saga_id,
@@ -1127,8 +1139,17 @@ impl Wallet {
             );
         }
 
-        self.localstore.delete_saga(saga_id).await?;
-        Ok(())
+        // Release proofs and delete saga
+        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
+        let proof_ys = reserved_proofs.iter().map(|p| p.y).collect();
+
+        RevertProofReservation {
+            localstore: self.localstore.clone(),
+            proof_ys,
+            saga_id: *saga_id,
+        }
+        .execute()
+        .await
     }
 
     /// Clean up orphaned quote reservations.

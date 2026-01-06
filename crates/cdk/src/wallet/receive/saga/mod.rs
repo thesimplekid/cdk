@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! ReceiveSaga<Initial>
-//!   └─> validate() -> ReceiveSaga<Validated>
+//!   └─> prepare() -> ReceiveSaga<Prepared>
 //!         └─> execute() -> ReceiveSaga<Finalized>
 //! ```
 
@@ -24,7 +24,7 @@ use cdk_common::wallet::{
 use tracing::instrument;
 
 use self::compensation::RemovePendingProofs;
-use self::state::{Finalized, Initial, Validated};
+use self::state::{Finalized, Initial, Prepared};
 use super::ReceiveOptions;
 use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
@@ -43,7 +43,7 @@ pub mod state;
 /// Saga pattern implementation for receive operations.
 ///
 /// Uses the typestate pattern to enforce valid state transitions at compile-time.
-/// Each state (Initial, Validated, Finalized) is a distinct type, and operations
+/// Each state (Initial, Prepared, Finalized) is a distinct type, and operations
 /// are only available on the appropriate type.
 pub struct ReceiveSaga<'a, S> {
     /// Wallet reference
@@ -66,7 +66,7 @@ impl<'a> ReceiveSaga<'a, Initial> {
         }
     }
 
-    /// Validate and prepare proofs for receiving.
+    /// Prepare proofs for receiving.
     ///
     /// This is the first step in the saga. It:
     /// 1. Loads mint info if needed
@@ -77,14 +77,14 @@ impl<'a> ReceiveSaga<'a, Initial> {
     ///
     /// No database changes are made in this step.
     #[instrument(skip_all)]
-    pub async fn validate(
+    pub async fn prepare(
         self,
         proofs: Proofs,
         opts: ReceiveOptions,
         memo: Option<String>,
-    ) -> Result<ReceiveSaga<'a, Validated>, Error> {
+    ) -> Result<ReceiveSaga<'a, Prepared>, Error> {
         tracing::info!(
-            "Validating receive for {} proofs with operation {}",
+            "Preparing receive for {} proofs with operation {}",
             proofs.len(),
             self.state_data.operation_id
         );
@@ -169,11 +169,11 @@ impl<'a> ReceiveSaga<'a, Initial> {
         // Store sig_flag for later use in execute
         // (This is handled in execute when signing blinded messages)
 
-        // Transition to Validated state
+        // Transition to Prepared state
         Ok(ReceiveSaga {
             wallet: self.wallet,
             compensations: self.compensations,
-            state_data: Validated {
+            state_data: Prepared {
                 operation_id: self.state_data.operation_id,
                 options: opts,
                 memo,
@@ -185,7 +185,7 @@ impl<'a> ReceiveSaga<'a, Initial> {
     }
 }
 
-impl<'a> ReceiveSaga<'a, Validated> {
+impl<'a> ReceiveSaga<'a, Prepared> {
     /// Execute the receive operation.
     ///
     /// This completes the receive by:

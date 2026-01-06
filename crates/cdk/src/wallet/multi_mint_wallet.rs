@@ -285,7 +285,7 @@ impl MultiMintPreparedMelt {
     /// Confirm the prepared melt and execute the payment
     pub async fn confirm(self) -> Result<super::melt::ConfirmedMelt, Error> {
         self.wallet
-            .confirm_melt(
+            .confirm_prepared_melt(
                 self.operation_id,
                 self.quote,
                 self.proofs,
@@ -299,7 +299,7 @@ impl MultiMintPreparedMelt {
     /// Cancel the prepared melt and release reserved proofs
     pub async fn cancel(self) -> Result<(), Error> {
         self.wallet
-            .cancel_melt(self.operation_id, self.proofs, self.proofs_to_swap)
+            .cancel_prepared_melt(self.operation_id, self.proofs, self.proofs_to_swap)
             .await
     }
 }

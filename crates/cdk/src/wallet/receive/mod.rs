@@ -41,7 +41,7 @@ impl Wallet {
         memo: Option<String>,
     ) -> Result<Amount, Error> {
         let saga = ReceiveSaga::new(self);
-        let saga = saga.validate(proofs, opts, memo).await?;
+        let saga = saga.prepare(proofs, opts, memo).await?;
         let saga = saga.execute().await?;
         Ok(saga.into_amount())
     }
