@@ -28,7 +28,7 @@ use crate::mint_url::MintUrl;
 use crate::nuts::nut00::ProofsMethods;
 use crate::nuts::nut23::QuoteState;
 use crate::nuts::{CurrencyUnit, MeltOptions, Proof, Proofs, SpendingConditions, State, Token};
-use crate::types::Melted;
+use crate::types::FinalizedMelt;
 #[cfg(all(feature = "tor", not(target_arch = "wasm32")))]
 use crate::wallet::mint_connector::transport::tor_transport::TorAsync;
 use crate::wallet::types::MintQuote;
@@ -1271,7 +1271,7 @@ impl MultiMintWallet {
         target_wallet: &Wallet,
         final_mint_quote: &MintQuote,
         final_melt_quote: &crate::wallet::types::MeltQuote,
-    ) -> Result<(Melted, Amount), Error> {
+    ) -> Result<(FinalizedMelt, Amount), Error> {
         // Step 1: Subscribe to mint quote updates before melting
         let mut subscription = target_wallet
             .subscribe(super::WalletSubscription::Bolt11MintQuoteState(vec![
@@ -1741,7 +1741,7 @@ impl MultiMintWallet {
         &self,
         mint_url: &MintUrl,
         quote_id: &str,
-    ) -> Result<Melted, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         let wallets = self.wallets.read().await;
         let wallet = wallets.get(mint_url).ok_or(Error::UnknownMint {
             mint_url: mint_url.to_string(),
@@ -1764,14 +1764,14 @@ impl MultiMintWallet {
     ///
     /// # Returns
     ///
-    /// A `Melted` result containing the payment details and any change proofs
+    /// A `FinalizedMelt` result containing the payment details and any change proofs
     #[instrument(skip(self, proofs))]
     pub async fn melt_proofs(
         &self,
         mint_url: &MintUrl,
         quote_id: &str,
         proofs: Proofs,
-    ) -> Result<Melted, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         let wallets = self.wallets.read().await;
         let wallet = wallets.get(mint_url).ok_or(Error::UnknownMint {
             mint_url: mint_url.to_string(),
@@ -1870,7 +1870,7 @@ impl MultiMintWallet {
     pub async fn mpp_melt(
         &self,
         quotes: Vec<(MintUrl, String)>, // (mint_url, quote_id)
-    ) -> Result<Vec<(MintUrl, Melted)>, Error> {
+    ) -> Result<Vec<(MintUrl, FinalizedMelt)>, Error> {
         let mut results = Vec::new();
         let mut tasks = Vec::new();
 
@@ -1989,7 +1989,7 @@ impl MultiMintWallet {
         bolt11: &str,
         options: Option<MeltOptions>,
         max_fee: Option<Amount>,
-    ) -> Result<Melted, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         // Parse the invoice to get the amount
         let invoice = bolt11
             .parse::<crate::Bolt11Invoice>()

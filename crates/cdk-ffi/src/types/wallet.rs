@@ -392,9 +392,10 @@ impl PreparedSend {
     }
 }
 
-/// FFI-compatible Melted result
+/// FFI-compatible FinalizedMelt result
 #[derive(Debug, Clone, uniffi::Record)]
-pub struct Melted {
+pub struct FinalizedMelt {
+    pub quote_id: String,
     pub state: super::quote::QuoteState,
     pub preimage: Option<String>,
     pub change: Option<Proofs>,
@@ -404,16 +405,17 @@ pub struct Melted {
 
 // MeltQuoteState is just an alias for nut05::QuoteState, so we don't need a separate implementation
 
-impl From<cdk::types::Melted> for Melted {
-    fn from(melted: cdk::types::Melted) -> Self {
+impl From<cdk::types::FinalizedMelt> for FinalizedMelt {
+    fn from(finalized: cdk::types::FinalizedMelt) -> Self {
         Self {
-            state: melted.state.into(),
-            preimage: melted.preimage,
-            change: melted
+            quote_id: finalized.quote_id,
+            state: finalized.state.into(),
+            preimage: finalized.preimage,
+            change: finalized
                 .change
                 .map(|proofs| proofs.into_iter().map(|p| p.into()).collect()),
-            amount: melted.amount.into(),
-            fee_paid: melted.fee_paid.into(),
+            amount: finalized.amount.into(),
+            fee_paid: finalized.fee_paid.into(),
         }
     }
 }

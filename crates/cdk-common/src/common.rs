@@ -11,9 +11,11 @@ use crate::nuts::{
 };
 use crate::Amount;
 
-/// Melt response with proofs
+/// Result of a finalized melt operation
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct Melted {
+pub struct FinalizedMelt {
+    /// Quote ID
+    pub quote_id: String,
     /// State of quote
     pub state: MeltQuoteState,
     /// Preimage of melt payment
@@ -26,9 +28,10 @@ pub struct Melted {
     pub fee_paid: Amount,
 }
 
-impl Melted {
-    /// Create new [`Melted`]
+impl FinalizedMelt {
+    /// Create new [`FinalizedMelt`]
     pub fn from_proofs(
+        quote_id: String,
         state: MeltQuoteState,
         preimage: Option<String>,
         quote_amount: Amount,
@@ -53,6 +56,7 @@ impl Melted {
             .ok_or(Error::AmountOverflow)?;
 
         Ok(Self {
+            quote_id,
             state,
             preimage,
             change: change_proofs,
@@ -232,14 +236,14 @@ mod tests {
 
     use cashu::SecretKey;
 
-    use super::{Melted, ProofInfo};
+    use super::{FinalizedMelt, ProofInfo};
     use crate::mint_url::MintUrl;
     use crate::nuts::{CurrencyUnit, Id, Proof, PublicKey, SpendingConditions, State};
     use crate::secret::Secret;
     use crate::Amount;
 
     #[test]
-    fn test_melted() {
+    fn test_finalized_melt() {
         let keyset_id = Id::from_str("00deadbeef123456").unwrap();
         let proof = Proof::new(
             Amount::from(64),
@@ -250,7 +254,8 @@ mod tests {
             )
             .unwrap(),
         );
-        let melted = Melted::from_proofs(
+        let finalized = FinalizedMelt::from_proofs(
+            "test_quote_id".to_string(),
             super::MeltQuoteState::Paid,
             Some("preimage".to_string()),
             Amount::from(64),
@@ -258,13 +263,14 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(melted.amount, Amount::from(64));
-        assert_eq!(melted.fee_paid, Amount::ZERO);
-        assert_eq!(melted.total_amount(), Amount::from(64));
+        assert_eq!(finalized.quote_id, "test_quote_id");
+        assert_eq!(finalized.amount, Amount::from(64));
+        assert_eq!(finalized.fee_paid, Amount::ZERO);
+        assert_eq!(finalized.total_amount(), Amount::from(64));
     }
 
     #[test]
-    fn test_melted_with_change() {
+    fn test_finalized_melt_with_change() {
         let keyset_id = Id::from_str("00deadbeef123456").unwrap();
         let proof = Proof::new(
             Amount::from(64),
@@ -284,7 +290,8 @@ mod tests {
             )
             .unwrap(),
         );
-        let melted = Melted::from_proofs(
+        let finalized = FinalizedMelt::from_proofs(
+            "test_quote_id".to_string(),
             super::MeltQuoteState::Paid,
             Some("preimage".to_string()),
             Amount::from(31),
@@ -292,9 +299,10 @@ mod tests {
             Some(vec![change_proof.clone()]),
         )
         .unwrap();
-        assert_eq!(melted.amount, Amount::from(31));
-        assert_eq!(melted.fee_paid, Amount::from(1));
-        assert_eq!(melted.total_amount(), Amount::from(32));
+        assert_eq!(finalized.quote_id, "test_quote_id");
+        assert_eq!(finalized.amount, Amount::from(31));
+        assert_eq!(finalized.fee_paid, Amount::from(1));
+        assert_eq!(finalized.total_amount(), Amount::from(32));
     }
 
     #[test]

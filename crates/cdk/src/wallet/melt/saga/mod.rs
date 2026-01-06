@@ -34,6 +34,7 @@ use self::compensation::{ReleaseMeltQuote, RevertProofReservation};
 use self::state::{Finalized, Initial, MeltRequested, Prepared};
 
 pub mod compensation;
+pub mod resume;
 pub mod state;
 
 /// Saga pattern implementation for melt operations.

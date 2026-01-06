@@ -35,20 +35,13 @@
 //! - **SwapRequested**: External call may have succeeded. Check mint for proof states
 //!   and either reconstruct outputs or compensate.
 
-use cdk_common::wallet::{
-    IssueSagaState, MeltOperationData, MeltSagaState, OperationData, ReceiveSagaState,
-    SendSagaState, SwapSagaState, WalletSagaState,
-};
+use cdk_common::wallet::WalletSagaState;
 use cdk_common::BlindedMessage;
 use tracing::instrument;
 
 use crate::dhke::construct_proofs;
 use crate::nuts::{CheckStateRequest, PreMintSecrets, RestoreRequest, State};
 use crate::types::ProofInfo;
-use crate::wallet::issue::saga::compensation::ReleaseMintQuote;
-use crate::wallet::melt::saga::compensation::ReleaseMeltQuote;
-use crate::wallet::receive::saga::compensation::RemovePendingProofs;
-use crate::wallet::saga::{CompensatingAction, RevertProofReservation};
 use crate::{Error, Wallet};
 
 /// Parameters for recovering outputs using stored blinded messages.
@@ -75,6 +68,101 @@ pub struct RecoveryReport {
     pub skipped: usize,
     /// Number of sagas that failed to recover
     pub failed: usize,
+}
+
+/// Result of a saga recovery operation.
+///
+/// Used by individual saga resume functions to indicate the outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryAction {
+    /// The saga was successfully recovered (outputs saved)
+    Recovered,
+    /// The saga was compensated (rolled back)
+    Compensated,
+    /// The saga was skipped (e.g., mint unreachable, payment pending)
+    Skipped,
+}
+
+/// Shared recovery helpers for saga resume operations.
+///
+/// These methods are used by individual saga resume modules to check
+/// external state and restore outputs.
+pub trait RecoveryHelpers {
+    /// Check if all proofs are spent by querying the mint.
+    ///
+    /// This is a simple check that doesn't update the database.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if all proofs are spent
+    /// - `Ok(false)` if any proofs are not spent
+    /// - `Err` if the mint is unreachable
+    fn are_proofs_spent(
+        &self,
+        proofs: &[ProofInfo],
+    ) -> impl std::future::Future<Output = Result<bool, Error>> + Send;
+
+    /// Restore outputs using stored blinded messages.
+    ///
+    /// Queries the mint's /restore endpoint to recover proof signatures,
+    /// then reconstructs the proofs.
+    ///
+    /// Returns:
+    /// - `Ok(Some(proofs))` if outputs were successfully restored
+    /// - `Ok(None)` if restoration failed (mint unreachable, no data, etc.)
+    /// - `Err` for unrecoverable errors (cryptographic failures, etc.)
+    fn restore_outputs(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+    ) -> impl std::future::Future<Output = Result<Option<Vec<ProofInfo>>, Error>> + Send;
+}
+
+impl RecoveryHelpers for Wallet {
+    /// Check if all proofs are spent by querying the mint.
+    async fn are_proofs_spent(&self, proofs: &[ProofInfo]) -> Result<bool, Error> {
+        if proofs.is_empty() {
+            return Ok(false);
+        }
+
+        let ys: Vec<_> = proofs.iter().map(|p| p.y).collect();
+        let response = self
+            .client
+            .post_check_state(CheckStateRequest { ys })
+            .await?;
+
+        Ok(response.states.iter().all(|s| s.state == State::Spent))
+    }
+
+    /// Restore outputs using stored blinded messages.
+    async fn restore_outputs(
+        &self,
+        saga_id: &uuid::Uuid,
+        saga_type: &str,
+        blinded_messages: Option<&[BlindedMessage]>,
+        counter_start: Option<u32>,
+        counter_end: Option<u32>,
+    ) -> Result<Option<Vec<ProofInfo>>, Error> {
+        // Clone blinded messages to avoid temporary lifetime issues
+        let blinded_messages_owned = blinded_messages.map(|bm| bm.to_vec());
+
+        // Extract and validate parameters
+        let params = match Self::extract_recovery_params(
+            saga_id,
+            saga_type,
+            blinded_messages_owned.as_ref(),
+            counter_start,
+            counter_end,
+        ) {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        self.recover_outputs_from_blinded_messages(saga_id, saga_type, params)
+            .await
+    }
 }
 
 impl Wallet {
@@ -112,21 +200,25 @@ impl Wallet {
                 saga.state.state_str()
             );
 
-            let result = match &saga.state {
-                WalletSagaState::Swap(state) => {
-                    self.recover_swap_saga(&saga.id, state, &saga.data).await
-                }
-                WalletSagaState::Send(state) => {
-                    self.recover_send_saga(&saga.id, state, &saga.data).await
-                }
-                WalletSagaState::Receive(state) => {
-                    self.recover_receive_saga(&saga.id, state, &saga.data).await
-                }
-                WalletSagaState::Issue(state) => {
-                    self.recover_issue_saga(&saga.id, state, &saga.data).await
-                }
-                WalletSagaState::Melt(state) => {
-                    self.recover_melt_saga(&saga.id, state, &saga.data).await
+            // Delegate to the saga-specific resume functions
+            let result: Result<RecoveryAction, Error> = match &saga.state {
+                WalletSagaState::Swap(_) => self.resume_swap_saga(&saga).await,
+                WalletSagaState::Send(_) => self.resume_send_saga(&saga).await,
+                WalletSagaState::Receive(_) => self.resume_receive_saga(&saga).await,
+                WalletSagaState::Issue(_) => self.resume_issue_saga(&saga).await,
+                WalletSagaState::Melt(_) => {
+                    // Melt saga returns Option<FinalizedMelt>, convert to RecoveryAction
+                    self.resume_melt_saga(&saga).await.map(|opt| match opt {
+                        Some(finalized) => {
+                            use cdk_common::MeltQuoteState;
+                            if finalized.state == MeltQuoteState::Paid {
+                                RecoveryAction::Recovered
+                            } else {
+                                RecoveryAction::Compensated
+                            }
+                        }
+                        None => RecoveryAction::Skipped,
+                    })
                 }
             };
 
@@ -160,181 +252,6 @@ impl Wallet {
         );
 
         Ok(report)
-    }
-
-    /// Recover a swap saga.
-    ///
-    /// # Recovery Logic
-    ///
-    /// - **ProofsReserved**: The swap request hasn't been sent to the mint yet.
-    ///   Safe to compensate by releasing the reserved proofs.
-    ///
-    /// - **SwapRequested**: The swap request was sent but we don't know the outcome.
-    ///   Need to check the mint to determine if the swap succeeded.
-    #[instrument(skip(self, data))]
-    async fn recover_swap_saga(
-        &self,
-        saga_id: &uuid::Uuid,
-        state: &SwapSagaState,
-        data: &OperationData,
-    ) -> Result<RecoveryAction, Error> {
-        match state {
-            SwapSagaState::ProofsReserved => {
-                // No external call was made - safe to compensate
-                tracing::info!(
-                    "Swap saga {} in ProofsReserved state - compensating",
-                    saga_id
-                );
-                self.compensate_swap_saga(saga_id).await?;
-                Ok(RecoveryAction::Compensated)
-            }
-            SwapSagaState::SwapRequested => {
-                // External call may have succeeded - need to check mint
-                tracing::info!(
-                    "Swap saga {} in SwapRequested state - checking mint for proof states",
-                    saga_id
-                );
-
-                // Get the reserved proofs for this operation
-                let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-
-                if reserved_proofs.is_empty() {
-                    // No proofs found - saga may have already been cleaned up
-                    tracing::warn!(
-                        "No reserved proofs found for saga {} - cleaning up orphaned saga",
-                        saga_id
-                    );
-                    self.localstore.delete_saga(saga_id).await?;
-                    return Ok(RecoveryAction::Recovered);
-                }
-
-                let proof_ys: Vec<_> = reserved_proofs.iter().map(|p| p.y).collect();
-
-                // Check proof states with the mint
-                let check_request = CheckStateRequest { ys: proof_ys };
-                let check_result = self.client.post_check_state(check_request).await;
-
-                match check_result {
-                    Ok(states) => {
-                        // If all input proofs are spent, the swap succeeded
-                        let all_spent = states.states.iter().all(|s| s.state == State::Spent);
-
-                        if all_spent {
-                            // Input proofs are spent - try to recover outputs
-                            self.recover_swap_outputs(saga_id, data).await?;
-                            Ok(RecoveryAction::Recovered)
-                        } else {
-                            // Proofs not spent - swap failed, safe to compensate
-                            tracing::info!(
-                                "Swap saga {} - input proofs not spent, compensating",
-                                saga_id
-                            );
-                            self.compensate_swap_saga(saga_id).await?;
-                            Ok(RecoveryAction::Compensated)
-                        }
-                    }
-                    Err(e) => {
-                        // Can't reach mint - skip for now, retry on next recovery
-                        tracing::warn!(
-                            "Swap saga {} - can't check proof states (mint unreachable: {}), skipping",
-                            saga_id,
-                            e
-                        );
-                        Ok(RecoveryAction::Skipped)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Compensate a swap saga by releasing reserved proofs and deleting the saga.
-    ///
-    /// Delegates to the shared `RevertProofReservation` compensation action.
-    #[instrument(skip(self))]
-    async fn compensate_swap_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let proof_ys = reserved_proofs.iter().map(|p| p.y).collect();
-
-        RevertProofReservation {
-            localstore: self.localstore.clone(),
-            proof_ys,
-            saga_id: *saga_id,
-        }
-        .execute()
-        .await
-    }
-
-    /// Recover swap outputs using stored blinded messages.
-    ///
-    /// When a swap succeeded (inputs are spent) but we crashed before saving outputs,
-    /// we can recover by querying the mint with the stored blinded messages.
-    #[instrument(skip(self, data))]
-    async fn recover_swap_outputs(
-        &self,
-        saga_id: &uuid::Uuid,
-        data: &OperationData,
-    ) -> Result<(), Error> {
-        let swap_data = match data {
-            OperationData::Swap(d) => d,
-            _ => {
-                tracing::error!("Swap saga {} has wrong operation data type", saga_id);
-                return Err(Error::Custom(
-                    "Invalid operation data for swap saga".to_string(),
-                ));
-            }
-        };
-
-        // Extract recovery parameters or fall back to cleanup
-        let params = match Self::extract_recovery_params(
-            saga_id,
-            "Swap",
-            swap_data.blinded_messages.as_ref(),
-            swap_data.counter_start,
-            swap_data.counter_end,
-        ) {
-            Some(p) => p,
-            None => return self.cleanup_saga_without_recovery(saga_id).await,
-        };
-
-        // Attempt to recover outputs
-        let proof_infos = match self
-            .recover_outputs_from_blinded_messages(saga_id, "Swap", params)
-            .await?
-        {
-            Some(proofs) => proofs,
-            None => return self.cleanup_saga_without_recovery(saga_id).await,
-        };
-
-        // Remove the input proofs (they're spent) and add recovered proofs
-        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let input_ys: Vec<_> = reserved_proofs.iter().map(|p| p.y).collect();
-
-        self.localstore.update_proofs(proof_infos, input_ys).await?;
-
-        // Delete the saga record
-        self.localstore.delete_saga(saga_id).await?;
-
-        Ok(())
-    }
-
-    /// Clean up a saga when we can't recover outputs.
-    /// Marks inputs as spent and deletes the saga.
-    #[instrument(skip(self))]
-    async fn cleanup_saga_without_recovery(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Remove the input proofs (they're spent)
-        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let input_ys: Vec<_> = reserved_proofs.iter().map(|p| p.y).collect();
-
-        if !input_ys.is_empty() {
-            self.localstore
-                .update_proofs_state(input_ys, State::Spent)
-                .await?;
-        }
-
-        // Delete the saga record
-        self.localstore.delete_saga(saga_id).await?;
-
-        Ok(())
     }
 
     /// Recover outputs using stored blinded messages.
@@ -490,668 +407,6 @@ impl Wallet {
         })
     }
 
-    /// Recover a send saga.
-    ///
-    /// # Recovery Logic
-    ///
-    /// - **ProofsReserved**: Proofs reserved but token not created.
-    ///   Safe to compensate by releasing the reserved proofs.
-    ///
-    /// - **TokenCreated**: Token was created. Check if proofs are still spendable.
-    ///   If spent, the send succeeded. If not spent, compensate.
-    #[instrument(skip(self, _data))]
-    async fn recover_send_saga(
-        &self,
-        saga_id: &uuid::Uuid,
-        state: &SendSagaState,
-        _data: &cdk_common::wallet::OperationData,
-    ) -> Result<RecoveryAction, Error> {
-        match state {
-            SendSagaState::ProofsReserved => {
-                // No token was created - safe to compensate
-                tracing::info!(
-                    "Send saga {} in ProofsReserved state - compensating",
-                    saga_id
-                );
-                self.compensate_proofs_saga(saga_id).await?;
-                Ok(RecoveryAction::Compensated)
-            }
-            SendSagaState::TokenCreated => {
-                // Token was created but we don't know if it was received
-                // For send, the proofs are marked PendingSpent once token is created
-                // If they're still in that state, the token wasn't redeemed yet
-                tracing::info!(
-                    "Send saga {} in TokenCreated state - checking proof states",
-                    saga_id
-                );
-
-                // Get the reserved/pending proofs for this operation
-                let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-
-                if reserved_proofs.is_empty() {
-                    // No proofs found - saga may have completed
-                    tracing::warn!(
-                        "No reserved proofs found for send saga {} - cleaning up orphaned saga",
-                        saga_id
-                    );
-                    self.localstore.delete_saga(saga_id).await?;
-                    return Ok(RecoveryAction::Recovered);
-                }
-
-                let proof_ys: Vec<_> = reserved_proofs.iter().map(|p| p.y).collect();
-
-                // Check proof states with the mint
-                let check_request = CheckStateRequest {
-                    ys: proof_ys.clone(),
-                };
-                let check_result = self.client.post_check_state(check_request).await;
-
-                match check_result {
-                    Ok(states) => {
-                        let all_spent = states.states.iter().all(|s| s.state == State::Spent);
-
-                        if all_spent {
-                            // Token was redeemed - mark proofs as spent and clean up
-                            tracing::info!(
-                                "Send saga {} - proofs are spent, marking as complete",
-                                saga_id
-                            );
-                            self.localstore
-                                .update_proofs_state(proof_ys, State::Spent)
-                                .await?;
-                            self.localstore.delete_saga(saga_id).await?;
-                            Ok(RecoveryAction::Recovered)
-                        } else {
-                            // Token wasn't redeemed - leave proofs in PendingSpent state
-                            // The user still has the token and could redeem it later
-                            tracing::info!(
-                                "Send saga {} - proofs not spent, token may still be valid",
-                                saga_id
-                            );
-                            self.localstore.delete_saga(saga_id).await?;
-                            Ok(RecoveryAction::Recovered)
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Send saga {} - can't check proof states (mint unreachable: {}), skipping",
-                            saga_id,
-                            e
-                        );
-                        Ok(RecoveryAction::Skipped)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Recover a receive saga.
-    ///
-    /// # Recovery Logic
-    ///
-    /// - **ProofsPending**: Proofs stored in Pending state but swap not executed.
-    ///   Safe to compensate by removing the pending proofs.
-    ///
-    /// - **SwapRequested**: Swap was requested. Check if input proofs are spent.
-    ///   If spent, try to reconstruct outputs. If not spent, compensate.
-    #[instrument(skip(self, data))]
-    async fn recover_receive_saga(
-        &self,
-        saga_id: &uuid::Uuid,
-        state: &ReceiveSagaState,
-        data: &OperationData,
-    ) -> Result<RecoveryAction, Error> {
-        match state {
-            ReceiveSagaState::ProofsPending => {
-                // No swap was executed - safe to compensate by removing pending proofs
-                tracing::info!(
-                    "Receive saga {} in ProofsPending state - compensating",
-                    saga_id
-                );
-                self.compensate_receive_saga(saga_id).await?;
-                Ok(RecoveryAction::Compensated)
-            }
-            ReceiveSagaState::SwapRequested => {
-                // Similar to swap saga - check if proofs were spent
-                tracing::info!(
-                    "Receive saga {} in SwapRequested state - checking mint for proof states",
-                    saga_id
-                );
-
-                // Get the pending proofs for this specific operation
-                let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-
-                if pending_proofs.is_empty() {
-                    tracing::warn!(
-                        "No pending proofs found for receive saga {} - cleaning up orphaned saga",
-                        saga_id
-                    );
-                    self.localstore.delete_saga(saga_id).await?;
-                    return Ok(RecoveryAction::Recovered);
-                }
-
-                let proof_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
-
-                let check_request = CheckStateRequest { ys: proof_ys };
-                let check_result = self.client.post_check_state(check_request).await;
-
-                match check_result {
-                    Ok(states) => {
-                        let all_spent = states.states.iter().all(|s| s.state == State::Spent);
-
-                        if all_spent {
-                            // Input proofs are spent - try to recover outputs
-                            self.recover_receive_outputs(saga_id, data).await?;
-                            Ok(RecoveryAction::Recovered)
-                        } else {
-                            // Proofs not spent - swap failed, compensate
-                            tracing::info!(
-                                "Receive saga {} - input proofs not spent, compensating",
-                                saga_id
-                            );
-                            self.compensate_receive_saga(saga_id).await?;
-                            Ok(RecoveryAction::Compensated)
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Receive saga {} - can't check proof states (mint unreachable: {}), skipping",
-                            saga_id,
-                            e
-                        );
-                        Ok(RecoveryAction::Skipped)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Compensate a receive saga by removing pending proofs and deleting the saga.
-    ///
-    /// Delegates to the `RemovePendingProofs` compensation action.
-    #[instrument(skip(self))]
-    async fn compensate_receive_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let proof_ys = pending_proofs.iter().map(|p| p.y).collect();
-
-        RemovePendingProofs {
-            localstore: self.localstore.clone(),
-            proof_ys,
-            saga_id: *saga_id,
-        }
-        .execute()
-        .await
-    }
-
-    /// Recover receive outputs using stored blinded messages.
-    ///
-    /// When a receive swap succeeded (inputs are spent) but we crashed before saving outputs,
-    /// we can recover by querying the mint with the stored blinded messages.
-    #[instrument(skip(self, data))]
-    async fn recover_receive_outputs(
-        &self,
-        saga_id: &uuid::Uuid,
-        data: &OperationData,
-    ) -> Result<(), Error> {
-        let receive_data = match data {
-            OperationData::Receive(d) => d,
-            _ => {
-                tracing::error!("Receive saga {} has wrong operation data type", saga_id);
-                return Err(Error::Custom(
-                    "Invalid operation data for receive saga".to_string(),
-                ));
-            }
-        };
-
-        // Extract recovery parameters or fall back to cleanup
-        let params = match Self::extract_recovery_params(
-            saga_id,
-            "Receive",
-            receive_data.blinded_messages.as_ref(),
-            receive_data.counter_start,
-            receive_data.counter_end,
-        ) {
-            Some(p) => p,
-            None => return self.cleanup_receive_saga_without_recovery(saga_id).await,
-        };
-
-        // Attempt to recover outputs
-        let proof_infos = match self
-            .recover_outputs_from_blinded_messages(saga_id, "Receive", params)
-            .await?
-        {
-            Some(proofs) => proofs,
-            None => return self.cleanup_receive_saga_without_recovery(saga_id).await,
-        };
-
-        // Remove the input proofs (they're spent) and add recovered proofs
-        let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let input_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
-
-        self.localstore.update_proofs(proof_infos, input_ys).await?;
-
-        // Delete the saga record
-        self.localstore.delete_saga(saga_id).await?;
-
-        Ok(())
-    }
-
-    /// Clean up a receive saga when we can't recover outputs.
-    /// Removes pending proofs (they're spent) and deletes the saga.
-    #[instrument(skip(self))]
-    async fn cleanup_receive_saga_without_recovery(
-        &self,
-        saga_id: &uuid::Uuid,
-    ) -> Result<(), Error> {
-        tracing::warn!(
-            "Receive saga {} - inputs are spent but outputs may not be saved. \
-             Run wallet.restore() to recover any missing proofs.",
-            saga_id
-        );
-
-        // Remove the pending input proofs (they're spent)
-        let pending_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        if !pending_proofs.is_empty() {
-            let input_ys: Vec<_> = pending_proofs.iter().map(|p| p.y).collect();
-            self.localstore.update_proofs(vec![], input_ys).await?;
-        }
-
-        self.localstore.delete_saga(saga_id).await?;
-        Ok(())
-    }
-
-    /// Recover an issue (mint) saga.
-    ///
-    /// # Recovery Logic
-    ///
-    /// - **SecretsPrepared**: Secrets created but mint request not sent.
-    ///   Safe to compensate (no proofs to revert, just delete saga).
-    ///
-    /// - **MintRequested**: Mint request was sent. Try to recover outputs
-    ///   using stored blinded messages.
-    #[instrument(skip(self, data))]
-    async fn recover_issue_saga(
-        &self,
-        saga_id: &uuid::Uuid,
-        state: &IssueSagaState,
-        data: &OperationData,
-    ) -> Result<RecoveryAction, Error> {
-        match state {
-            IssueSagaState::SecretsPrepared => {
-                // No mint request was sent - safe to delete saga
-                // Counter increments are not reversed (by design)
-                tracing::info!(
-                    "Issue saga {} in SecretsPrepared state - cleaning up",
-                    saga_id
-                );
-
-                // Release the mint quote reservation (best-effort, continue on error)
-                if let Err(e) = (ReleaseMintQuote {
-                    localstore: self.localstore.clone(),
-                    operation_id: *saga_id,
-                }
-                .execute()
-                .await)
-                {
-                    tracing::warn!(
-                        "Failed to release mint quote for saga {}: {}. Continuing with saga cleanup.",
-                        saga_id,
-                        e
-                    );
-                }
-
-                self.localstore.delete_saga(saga_id).await?;
-                Ok(RecoveryAction::Compensated)
-            }
-            IssueSagaState::MintRequested => {
-                // Mint request was sent - try to recover outputs
-                tracing::info!(
-                    "Issue saga {} in MintRequested state - attempting recovery",
-                    saga_id
-                );
-                self.recover_issue_outputs(saga_id, data).await?;
-                Ok(RecoveryAction::Recovered)
-            }
-        }
-    }
-
-    /// Recover issue outputs using stored blinded messages.
-    ///
-    /// When a mint request succeeded but we crashed before saving outputs,
-    /// we can recover by querying the mint with the stored blinded messages.
-    #[instrument(skip(self, data))]
-    async fn recover_issue_outputs(
-        &self,
-        saga_id: &uuid::Uuid,
-        data: &OperationData,
-    ) -> Result<(), Error> {
-        let issue_data = match data {
-            OperationData::Mint(d) => d,
-            _ => {
-                tracing::error!("Issue saga {} has wrong operation data type", saga_id);
-                return Err(Error::Custom(
-                    "Invalid operation data for issue saga".to_string(),
-                ));
-            }
-        };
-
-        // Extract recovery parameters or fall back to cleanup
-        let params = match Self::extract_recovery_params(
-            saga_id,
-            "Issue",
-            issue_data.blinded_messages.as_ref(),
-            issue_data.counter_start,
-            issue_data.counter_end,
-        ) {
-            Some(p) => p,
-            None => {
-                // Issue saga has no input proofs - just delete the saga
-                self.localstore.delete_saga(saga_id).await?;
-                return Ok(());
-            }
-        };
-
-        // Attempt to recover outputs
-        let proof_infos = match self
-            .recover_outputs_from_blinded_messages(saga_id, "Issue", params)
-            .await?
-        {
-            Some(proofs) => proofs,
-            None => {
-                // Issue saga has no input proofs - just delete the saga
-                self.localstore.delete_saga(saga_id).await?;
-                return Ok(());
-            }
-        };
-
-        // Issue has no input proofs to remove - just add the recovered proofs
-        self.localstore.update_proofs(proof_infos, vec![]).await?;
-
-        // Delete the saga record
-        self.localstore.delete_saga(saga_id).await?;
-
-        Ok(())
-    }
-
-    /// Recover a melt saga.
-    ///
-    /// # Recovery Logic
-    ///
-    /// - **ProofsReserved**: Proofs reserved but melt not executed.
-    ///   Safe to compensate by releasing the reserved proofs.
-    ///
-    /// - **MeltRequested**: Melt request was sent. Check quote state
-    ///   to determine if payment succeeded.
-    ///
-    /// - **PaymentPending**: Payment is pending. Check quote state
-    ///   and wait for resolution.
-    #[instrument(skip(self, data))]
-    async fn recover_melt_saga(
-        &self,
-        saga_id: &uuid::Uuid,
-        state: &MeltSagaState,
-        data: &cdk_common::wallet::OperationData,
-    ) -> Result<RecoveryAction, Error> {
-        match state {
-            MeltSagaState::ProofsReserved => {
-                // No melt was executed - safe to compensate
-                tracing::info!(
-                    "Melt saga {} in ProofsReserved state - compensating",
-                    saga_id
-                );
-                self.compensate_melt_saga(saga_id).await?;
-                Ok(RecoveryAction::Compensated)
-            }
-            MeltSagaState::MeltRequested | MeltSagaState::PaymentPending => {
-                // Melt was requested or payment is pending - check quote state
-                tracing::info!(
-                    "Melt saga {} in {:?} state - checking quote state",
-                    saga_id,
-                    state
-                );
-
-                let melt_data = match data {
-                    cdk_common::wallet::OperationData::Melt(d) => d,
-                    _ => {
-                        return Err(Error::Custom(format!(
-                            "Invalid operation data for melt saga {}",
-                            saga_id
-                        )))
-                    }
-                };
-
-                // Check quote state with the mint
-                match self.client.get_melt_quote_status(&melt_data.quote_id).await {
-                    Ok(quote_status) => {
-                        use cdk_common::MeltQuoteState;
-                        match quote_status.state {
-                            MeltQuoteState::Paid => {
-                                // Payment succeeded - mark proofs as spent and clean up
-                                tracing::info!(
-                                    "Melt saga {} - payment succeeded, finalizing",
-                                    saga_id
-                                );
-                                self.finalize_melt_saga(saga_id, melt_data).await?;
-                                Ok(RecoveryAction::Recovered)
-                            }
-                            MeltQuoteState::Unpaid | MeltQuoteState::Failed => {
-                                // Payment failed - compensate
-                                tracing::info!(
-                                    "Melt saga {} - payment failed, compensating",
-                                    saga_id
-                                );
-                                self.compensate_melt_saga(saga_id).await?;
-                                Ok(RecoveryAction::Compensated)
-                            }
-                            MeltQuoteState::Pending | MeltQuoteState::Unknown => {
-                                // Still pending or unknown - skip and retry later
-                                tracing::info!(
-                                    "Melt saga {} - payment pending/unknown, skipping",
-                                    saga_id
-                                );
-                                Ok(RecoveryAction::Skipped)
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Melt saga {} - can't check quote state (mint unreachable: {}), skipping",
-                            saga_id,
-                            e
-                        );
-                        Ok(RecoveryAction::Skipped)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Finalize a melt saga after confirming payment succeeded.
-    ///
-    /// Marks input proofs as spent and tries to recover change proofs
-    /// using stored blinded messages.
-    #[instrument(skip(self, melt_data))]
-    async fn finalize_melt_saga(
-        &self,
-        saga_id: &uuid::Uuid,
-        melt_data: &MeltOperationData,
-    ) -> Result<(), Error> {
-        // Mark input proofs as spent
-        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        if !reserved_proofs.is_empty() {
-            let proof_ys: Vec<_> = reserved_proofs.iter().map(|p| p.y).collect();
-            self.localstore
-                .update_proofs_state(proof_ys, State::Spent)
-                .await?;
-        }
-
-        // Try to recover change proofs using stored blinded messages
-        if let Some(ref change_blinded_messages) = melt_data.change_blinded_messages {
-            if !change_blinded_messages.is_empty() {
-                if let Err(e) = self
-                    .recover_melt_change(saga_id, melt_data, change_blinded_messages)
-                    .await
-                {
-                    tracing::warn!(
-                        "Melt saga {} - failed to recover change: {}. \
-                         Run wallet.restore() to recover any missing change.",
-                        saga_id,
-                        e
-                    );
-                }
-            }
-        } else {
-            tracing::warn!(
-                "Melt saga {} - payment succeeded but no change blinded messages stored. \
-                 Run wallet.restore() to recover any missing change.",
-                saga_id
-            );
-        }
-
-        self.localstore.delete_saga(saga_id).await?;
-        Ok(())
-    }
-
-    /// Recover melt change proofs using stored blinded messages.
-    #[instrument(skip(self, melt_data, change_blinded_messages))]
-    async fn recover_melt_change(
-        &self,
-        saga_id: &uuid::Uuid,
-        melt_data: &MeltOperationData,
-        change_blinded_messages: &[crate::nuts::BlindedMessage],
-    ) -> Result<(), Error> {
-        // Get counter range for re-deriving secrets
-        let (counter_start, counter_end) = match (melt_data.counter_start, melt_data.counter_end) {
-            (Some(start), Some(end)) => (start, end),
-            _ => {
-                return Err(Error::Custom(
-                    "No counter range stored for melt change recovery".to_string(),
-                ));
-            }
-        };
-
-        tracing::info!(
-            "Melt saga {} - attempting to recover {} change outputs",
-            saga_id,
-            change_blinded_messages.len()
-        );
-
-        // Query the mint for signatures using the stored blinded messages
-        let restore_request = RestoreRequest {
-            outputs: change_blinded_messages.to_vec(),
-        };
-
-        let restore_response = self.client.post_restore(restore_request).await?;
-
-        if restore_response.signatures.is_empty() {
-            tracing::info!(
-                "Melt saga {} - mint returned no change signatures (change may have been 0)",
-                saga_id
-            );
-            return Ok(());
-        }
-
-        // Get keyset ID from the first blinded message
-        let keyset_id = change_blinded_messages[0].keyset_id;
-
-        // Re-derive premint secrets using the counter range
-        let premint_secrets =
-            PreMintSecrets::restore_batch(keyset_id, &self.seed, counter_start, counter_end)?;
-
-        // Match the returned outputs to our premint secrets by B_ value
-        let matched_secrets: Vec<_> = premint_secrets
-            .secrets
-            .iter()
-            .filter(|p| restore_response.outputs.contains(&p.blinded_message))
-            .collect();
-
-        if matched_secrets.len() != restore_response.signatures.len() {
-            tracing::warn!(
-                "Melt saga {} - change signature count mismatch: {} secrets, {} signatures",
-                saga_id,
-                matched_secrets.len(),
-                restore_response.signatures.len()
-            );
-        }
-
-        // Load keyset keys for proof construction
-        let keys = self.load_keyset_keys(keyset_id).await?;
-
-        // Construct proofs from signatures
-        let proofs = construct_proofs(
-            restore_response.signatures,
-            matched_secrets.iter().map(|p| p.r.clone()).collect(),
-            matched_secrets.iter().map(|p| p.secret.clone()).collect(),
-            &keys,
-        )?;
-
-        tracing::info!(
-            "Melt saga {} - recovered {} change proofs",
-            saga_id,
-            proofs.len()
-        );
-
-        // Store the recovered change proofs
-        let proof_infos: Vec<ProofInfo> = proofs
-            .into_iter()
-            .map(|p| ProofInfo::new(p, self.mint_url.clone(), State::Unspent, self.unit.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        self.localstore.update_proofs(proof_infos, vec![]).await?;
-
-        Ok(())
-    }
-
-    /// Generic compensation for sagas with reserved proofs.
-    ///
-    /// Delegates to the shared `RevertProofReservation` compensation action.
-    #[instrument(skip(self))]
-    async fn compensate_proofs_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let proof_ys = reserved_proofs.iter().map(|p| p.y).collect();
-
-        RevertProofReservation {
-            localstore: self.localstore.clone(),
-            proof_ys,
-            saga_id: *saga_id,
-        }
-        .execute()
-        .await
-    }
-
-    /// Compensation for melt sagas - releases both proofs and the melt quote.
-    ///
-    /// Delegates to `ReleaseMeltQuote` and `RevertProofReservation` compensation actions.
-    #[instrument(skip(self))]
-    async fn compensate_melt_saga(&self, saga_id: &uuid::Uuid) -> Result<(), Error> {
-        // Release melt quote (best-effort, continue on error)
-        if let Err(e) = (ReleaseMeltQuote {
-            localstore: self.localstore.clone(),
-            operation_id: *saga_id,
-        }
-        .execute()
-        .await)
-        {
-            tracing::warn!(
-                "Failed to release melt quote for saga {}: {}. Continuing with saga cleanup.",
-                saga_id,
-                e
-            );
-        }
-
-        // Release proofs and delete saga
-        let reserved_proofs = self.localstore.get_reserved_proofs(saga_id).await?;
-        let proof_ys = reserved_proofs.iter().map(|p| p.y).collect();
-
-        RevertProofReservation {
-            localstore: self.localstore.clone(),
-            proof_ys,
-            saga_id: *saga_id,
-        }
-        .execute()
-        .await
-    }
-
     /// Clean up orphaned quote reservations.
     ///
     /// This handles the case where the wallet crashed after reserving a quote
@@ -1244,16 +499,6 @@ impl Wallet {
     }
 }
 
-/// Result of a saga recovery operation
-enum RecoveryAction {
-    /// The saga was successfully recovered (outputs saved)
-    Recovered,
-    /// The saga was compensated (rolled back)
-    Compensated,
-    /// The saga was skipped (e.g., mint unreachable)
-    Skipped,
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -1265,8 +510,9 @@ mod tests {
     use cdk_common::nuts::{CurrencyUnit, Id, MeltQuoteState, Proof, State};
     use cdk_common::secret::Secret;
     use cdk_common::wallet::{
-        MeltOperationData, MeltQuote, MintOperationData, MintQuote, OperationData,
-        ReceiveOperationData, SendOperationData, SwapOperationData, WalletSaga, WalletSagaState,
+        IssueSagaState, MeltOperationData, MeltQuote, MeltSagaState, MintOperationData, MintQuote,
+        OperationData, ReceiveOperationData, ReceiveSagaState, SendOperationData, SendSagaState,
+        SwapOperationData, SwapSagaState, WalletSaga, WalletSagaState,
     };
     use cdk_common::{Amount, PaymentMethod, SecretKey};
 

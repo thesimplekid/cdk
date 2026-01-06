@@ -36,3 +36,6 @@ pub use cashu::{dhke, ensure_cdk, mint_url, secret, util, SECP256K1};
 pub use error::Error;
 /// Re-export parking_lot for reuse
 pub use parking_lot;
+
+// Re-export common types
+pub use common::FinalizedMelt;

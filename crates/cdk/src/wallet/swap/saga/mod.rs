@@ -36,6 +36,7 @@ use crate::wallet::saga::{
 use crate::{Amount, Error, Wallet};
 
 pub mod compensation;
+pub mod resume;
 pub mod state;
 
 /// Saga pattern implementation for swap operations.

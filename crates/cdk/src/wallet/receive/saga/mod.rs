@@ -38,6 +38,7 @@ use crate::wallet::saga::{
 use crate::{Amount, Error, Wallet, SECP256K1};
 
 pub mod compensation;
+pub mod resume;
 pub mod state;
 
 /// Saga pattern implementation for receive operations.

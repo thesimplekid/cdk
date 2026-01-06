@@ -35,6 +35,7 @@ use crate::wallet::SendKind;
 use crate::{Amount, Error, Wallet};
 
 pub mod compensation;
+pub mod resume;
 pub mod state;
 
 /// Saga pattern implementation for send operations.

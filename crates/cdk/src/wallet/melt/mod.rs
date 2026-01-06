@@ -42,7 +42,7 @@ use tracing::instrument;
 use uuid::Uuid;
 
 use crate::nuts::Proofs;
-use crate::types::Melted;
+use crate::types::FinalizedMelt;
 use crate::{Amount, Wallet};
 
 #[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
@@ -252,7 +252,7 @@ impl Wallet {
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub async fn melt(&self, quote_id: &str) -> Result<Melted, Error> {
+    pub async fn melt(&self, quote_id: &str) -> Result<FinalizedMelt, Error> {
         self.melt_with_metadata(quote_id, HashMap::new()).await
     }
 
@@ -260,19 +260,20 @@ impl Wallet {
     ///
     /// Like `melt()`, but allows attaching custom metadata to the transaction record.
     ///
-    /// Note: The returned `Melted` struct contains the actual state from the mint.
+    /// Note: The returned `FinalizedMelt` struct contains the actual state from the mint.
     /// If `state` is `Pending`, the payment is in-flight and will complete later.
-    /// Call `check_pending_melt_quotes()` to finalize pending melts.
+    /// Call `finalize_pending_melts()` to finalize pending melts.
     #[instrument(skip(self, metadata))]
     pub async fn melt_with_metadata(
         &self,
         quote_id: &str,
         metadata: HashMap<String, String>,
-    ) -> Result<Melted, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         let prepared = self.prepare_melt(quote_id, metadata).await?;
         let confirmed = prepared.confirm().await?;
 
-        Ok(Melted {
+        Ok(FinalizedMelt {
+            quote_id: quote_id.to_string(),
             state: confirmed.state(),
             preimage: confirmed.payment_preimage().cloned(),
             amount: confirmed.amount(),
@@ -338,7 +339,7 @@ impl Wallet {
         &self,
         quote_id: &str,
         proofs: crate::nuts::Proofs,
-    ) -> Result<Melted, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         self.melt_proofs_with_metadata(quote_id, proofs, HashMap::new())
             .await
     }
@@ -350,11 +351,12 @@ impl Wallet {
         quote_id: &str,
         proofs: crate::nuts::Proofs,
         metadata: HashMap<String, String>,
-    ) -> Result<Melted, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         let prepared = self.prepare_melt_proofs(quote_id, proofs, metadata).await?;
         let confirmed = prepared.confirm().await?;
 
-        Ok(Melted {
+        Ok(FinalizedMelt {
+            quote_id: quote_id.to_string(),
             state: confirmed.state(),
             preimage: confirmed.payment_preimage().cloned(),
             amount: confirmed.amount(),
@@ -363,14 +365,68 @@ impl Wallet {
         })
     }
 
-    /// Check pending melt quotes
+    /// Finalize pending melt operations.
+    ///
+    /// This checks all incomplete melt sagas where payment may be pending,
+    /// queries the mint for the current quote status, and:
+    /// - **Paid**: Marks proofs as spent, recovers change, returns `FinalizedMelt` with state `Paid`
+    /// - **Failed/Unpaid**: Compensates by releasing reserved proofs, returns `FinalizedMelt` with state `Unpaid`/`Failed`
+    /// - **Pending/Unknown**: Skips (payment still in flight), not included in result
+    ///
+    /// Call this periodically or after receiving a notification that a
+    /// pending payment may have settled.
+    ///
+    /// # Returns
+    ///
+    /// A vector of finalized melt results. Check the `state` field to determine
+    /// if each melt succeeded (`Paid`) or failed (`Unpaid`/`Failed`).
+    /// Melts that are still pending are not included in the result.
     #[instrument(skip_all)]
-    pub async fn check_pending_melt_quotes(&self) -> Result<(), Error> {
-        let quotes = self.get_pending_melt_quotes().await?;
-        for quote in quotes {
-            self.melt_quote_status(&quote.id).await?;
+    pub async fn finalize_pending_melts(&self) -> Result<Vec<FinalizedMelt>, Error> {
+        use cdk_common::wallet::{MeltSagaState, WalletSagaState};
+
+        let sagas = self.localstore.get_incomplete_sagas().await?;
+
+        // Filter to only melt sagas in states that need checking
+        let melt_sagas: Vec<_> = sagas
+            .into_iter()
+            .filter(|s| {
+                matches!(
+                    &s.state,
+                    WalletSagaState::Melt(MeltSagaState::MeltRequested | MeltSagaState::PaymentPending)
+                )
+            })
+            .collect();
+
+        if melt_sagas.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(())
+
+        tracing::info!("Found {} pending melt(s) to check", melt_sagas.len());
+
+        let mut results = Vec::new();
+
+        for saga in melt_sagas {
+            match self.resume_melt_saga(&saga).await {
+                Ok(Some(melted)) => {
+                    tracing::info!(
+                        "Melt {} finalized with state {:?}",
+                        saga.id,
+                        melted.state
+                    );
+                    results.push(melted);
+                }
+                Ok(None) => {
+                    tracing::debug!("Melt {} still pending or compensated early", saga.id);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to finalize melt {}: {}", saga.id, e);
+                    // Continue with other sagas instead of failing entirely
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     /// Confirm a prepared melt with already-reserved proofs (internal helper for Arc<Wallet>).
