@@ -412,7 +412,7 @@ impl Wallet {
         proofs: Proofs,
         proofs_to_swap: Proofs,
         _swap_fee: Amount,
-        _input_fee: Amount,
+        _input_fee: Amount, // Now recalculated from actual final_proofs
         metadata: HashMap<String, String>,
     ) -> Result<ConfirmedMelt, Error> {
         use cdk_common::amount::SplitTarget;
@@ -429,24 +429,21 @@ impl Wallet {
         let active_keyset_id = self.fetch_active_keyset().await?.id;
         let mut quote_info = quote.clone();
 
-        let inputs_needed_amount = quote_info.amount + quote_info.fee_reserve;
         let mut final_proofs = proofs.clone();
 
-        // Swap if necessary
+        // Swap if necessary - don't specify amount, take all output
+        // The swap will produce proofs_to_swap.total - swap_fee worth of output
+        // which combined with final_proofs should be enough for the melt
         if !proofs_to_swap.is_empty() {
-            let swap_amount = inputs_needed_amount
-                .checked_sub(final_proofs.total_amount()?)
-                .ok_or(Error::AmountOverflow)?;
-
             tracing::debug!(
-                "Swapping {} proofs to get {}",
+                "Swapping {} proofs (total: {})",
                 proofs_to_swap.len(),
-                swap_amount
+                proofs_to_swap.total_amount()?
             );
 
             if let Some(swapped) = self
                 .swap(
-                    Some(swap_amount),
+                    None, // Take all output, don't specify amount
                     SplitTarget::None,
                     proofs_to_swap.clone(),
                     None,
@@ -457,6 +454,10 @@ impl Wallet {
                 final_proofs.extend(swapped);
             }
         }
+
+        // Recalculate the actual input_fee based on final_proofs
+        let actual_input_fee = self.get_proofs_fee(&final_proofs).await?.total;
+        let inputs_needed_amount = quote_info.amount + quote_info.fee_reserve + actual_input_fee;
 
         let proofs_total = final_proofs.total_amount()?;
         if proofs_total < inputs_needed_amount {
@@ -492,8 +493,8 @@ impl Wallet {
             .await?;
 
         // Calculate change accounting for input fees
-        let input_fee = self.get_proofs_fee(&final_proofs).await?.total;
-        let change_amount = proofs_total - quote_info.amount - input_fee;
+        // Note: actual_input_fee was already calculated above for checking if we have enough
+        let change_amount = proofs_total - quote_info.amount - actual_input_fee;
 
         let premint_secrets = if change_amount <= Amount::ZERO {
             PreMintSecrets::new(active_keyset_id)

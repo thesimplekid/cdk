@@ -182,3 +182,91 @@ async fn test_concurrent_melts_isolated() -> Result<()> {
 
     Ok(())
 }
+
+// =============================================================================
+// Melt Saga Input Fee Tests
+// =============================================================================
+
+/// Tests that melt saga correctly includes input fees when calculating total needed.
+///
+/// This is a regression test for a bug where confirm_melt calculated:
+///   inputs_needed_amount = quote.amount + fee_reserve
+/// but should calculate:
+///   inputs_needed_amount = quote.amount + fee_reserve + input_fee
+///
+/// The bug manifested as: "not enough inputs provided for melt. Provided: X, needed: X+1"
+///
+/// Scenario:
+/// - Mint with 1000 ppk (1 sat per proof input fee)
+/// - Melt for 26 sats
+/// - fee_reserve = 2 sats
+/// - If wallet has proofs that don't exactly match, it swaps first
+/// - The swap produces proofs totaling (amount + fee_reserve) = 28 sats
+/// - But mint actually needs (amount + fee_reserve + input_fee) = 29 sats
+///
+/// Before fix: Melt fails with "not enough inputs provided for melt"
+/// After fix: Melt succeeds
+#[tokio::test]
+async fn test_melt_saga_includes_input_fees() -> Result<()> {
+    use cdk::nuts::CurrencyUnit;
+
+    setup_tracing();
+    let mint = create_and_start_test_mint().await?;
+    let wallet = create_test_wallet_for_mint(mint.clone()).await?;
+
+    // Rotate to keyset with 1000 ppk = 1 sat per proof fee
+    // This is required to trigger the bug - without input fees, the calculation is correct
+    mint.rotate_keyset(
+        CurrencyUnit::Sat,
+        cdk_integration_tests::standard_keyset_amounts(32),
+        1000, // 1 sat per proof input fee
+    )
+    .await
+    .expect("Failed to rotate keyset");
+
+    // Brief pause to ensure keyset rotation is complete
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Fund wallet with enough to cover melt amount + fee_reserve + input fees
+    // Use larger amounts to ensure there are enough proofs of the right denominations
+    let initial_amount = 500u64;
+    fund_wallet(wallet.clone(), initial_amount, None).await?;
+
+    let initial_balance = wallet.total_balance().await?;
+    assert_eq!(initial_balance, Amount::from(initial_amount));
+
+    // Create melt quote for an amount that requires a swap
+    // 100 sats = 100000 msats
+    // fee_reserve should be ~2 sats (2% of 100)
+    // inputs_needed without input_fee = 102 sats
+    // With input_fee (depends on proof count), mint needs more
+    let invoice = create_fake_invoice(100_000, "test melt with fees".to_string());
+    let melt_quote = wallet.melt_quote(invoice.to_string(), None).await?;
+
+    tracing::info!(
+        "Melt quote: amount={}, fee_reserve={}",
+        melt_quote.amount,
+        melt_quote.fee_reserve
+    );
+
+    // Perform the melt - this should succeed even with input fees
+    // Before the fix, this would fail with:
+    // "not enough inputs provided for melt. Provided: X, needed: X+1"
+    let melted = wallet.melt(&melt_quote.id).await?;
+
+    assert_eq!(melted.state, MeltQuoteState::Paid);
+    tracing::info!(
+        "Melt succeeded: amount={}, fee_paid={}",
+        melted.amount,
+        melted.fee_paid
+    );
+
+    // Verify final balance makes sense
+    let final_balance = wallet.total_balance().await?;
+    assert!(
+        final_balance < initial_balance,
+        "Balance should decrease after melt"
+    );
+
+    Ok(())
+}

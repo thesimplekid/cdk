@@ -25,7 +25,6 @@ use crate::nuts::nut00::ProofsMethods;
 use crate::nuts::{Proofs, State};
 use crate::types::ProofInfo;
 use crate::wallet::saga::{add_compensation, new_compensations, Compensations};
-use crate::wallet::send::split_proofs_for_send;
 use crate::wallet::MeltQuote;
 use crate::{ensure_cdk, Amount, Error, Wallet};
 
@@ -192,59 +191,61 @@ impl<'a> MeltSaga<'a, Initial> {
         }
 
         // Need to swap to get exact denominations
+        // For melt operations, we need to account for:
+        // 1. The melt amount (quote.amount + fee_reserve)
+        // 2. The swap fee (charged when we swap to get correct denominations)
+        // 3. The melt input fee (charged by mint on the proofs we send)
+        //
+        // The tricky part is that after a swap, we have (input - swap_fee) in output.
+        // Then the mint charges input_fee on those output proofs.
+        // So we need: swap_output - melt_input_fee >= inputs_needed_amount
+        //
+        // To ensure we have enough after both fees, we estimate the melt input fee
+        // based on an optimal split of inputs_needed_amount and select proofs to cover that.
+
         let active_keyset_id = self.wallet.get_active_keyset().await?.id;
         let fee_and_amounts = self
             .wallet
             .get_keyset_fees_and_amounts_by_id(active_keyset_id)
             .await?;
 
-        // Calculate optimal denomination split and the fee for those proofs
-        let initial_split = inputs_needed_amount.split(&fee_and_amounts);
-        let target_fee = self
+        // Estimate melt input fee based on optimal split of inputs_needed_amount
+        let estimated_output_count = inputs_needed_amount.split(&fee_and_amounts).len();
+        let estimated_melt_fee = self
             .wallet
-            .get_proofs_fee_by_count(
-                vec![(active_keyset_id, initial_split.len() as u64)]
-                    .into_iter()
-                    .collect(),
-            )
-            .await?
-            .total;
+            .get_keyset_count_fee(&active_keyset_id, estimated_output_count as u64)
+            .await?;
 
-        // Include swap fee in selection
-        let inputs_total_needed = inputs_needed_amount + target_fee;
-        let target_amounts = inputs_total_needed.split(&fee_and_amounts);
+        // Select proofs that will give us enough AFTER swap to cover melt + melt_input_fee
+        // select_proofs with include_fees=true gives: proofs_total - swap_fee >= selection_amount
+        // We want: (proofs_total - swap_fee) - melt_input_fee >= inputs_needed_amount
+        // So selection_amount = inputs_needed_amount + estimated_melt_fee
+        let selection_amount = inputs_needed_amount + estimated_melt_fee;
 
         let input_proofs = Wallet::select_proofs(
-            inputs_total_needed,
+            selection_amount,
             available_proofs,
             &active_keyset_ids,
             &keyset_fees_and_amounts,
             true,
         )?;
 
-        let keyset_fees: HashMap<cdk_common::Id, u64> = keyset_fees_and_amounts
-            .iter()
-            .map(|(key, values)| (*key, values.fee()))
-            .collect();
+        // The input_fee is the fee that will be charged on the optimal output proofs after swap.
+        // This is the same as estimated_melt_fee which was calculated based on the optimal split.
+        let input_fee = estimated_melt_fee;
 
-        let split_result = split_proofs_for_send(
-            input_proofs,
-            &target_amounts,
-            inputs_total_needed,
-            target_fee,
-            &keyset_fees,
-            false,
-            false,
-        )?;
+        // For melt, put ALL proofs in proofs_to_swap and let the swap produce
+        // the exact denominations needed. The swap output will be optimally split.
+        // No proofs_to_send - everything goes through swap to ensure correct denominations.
+        let proofs_to_send = Proofs::new();
+        let proofs_to_swap = input_proofs;
+        let swap_fee = self.wallet.get_proofs_fee(&proofs_to_swap).await?.total;
 
-        // Only reserve proofs_to_send - proofs_to_swap will be reserved by the swap saga
-        // when it runs in confirm(). This is important because if the swap succeeds,
-        // proofs_to_swap are deleted and replaced by send_proofs + change_proofs.
-        // We track send_proofs via RevertSwappedProofs compensation.
-        let proof_ys = split_result.proofs_to_send.ys()?;
+        // Reserve proofs_to_swap (all proofs in this case) since they'll be swapped
+        let proof_ys = proofs_to_swap.ys()?;
         let operation_id = self.state_data.operation_id;
 
-        // Reserve only proofs_to_send
+        // Reserve all proofs that will be swapped
         if !proof_ys.is_empty() {
             self.wallet
                 .localstore
@@ -283,21 +284,15 @@ impl<'a> MeltSaga<'a, Initial> {
         )
         .await;
 
-        let input_fee = self
-            .wallet
-            .get_proofs_fee(&split_result.proofs_to_send)
-            .await?
-            .total;
-
         Ok(MeltSaga {
             wallet: self.wallet,
             compensations: self.compensations,
             state_data: Prepared {
                 operation_id: self.state_data.operation_id,
                 quote: quote_info,
-                proofs: split_result.proofs_to_send,
-                proofs_to_swap: split_result.proofs_to_swap,
-                swap_fee: split_result.swap_fee,
+                proofs: proofs_to_send,
+                proofs_to_swap,
+                swap_fee,
                 input_fee,
             },
         })
