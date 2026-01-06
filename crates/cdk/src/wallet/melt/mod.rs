@@ -35,14 +35,19 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+use cdk_common::amount::SplitTarget;
 use cdk_common::util::unix_time;
-use cdk_common::wallet::{MeltQuote, Transaction, TransactionDirection};
+use cdk_common::wallet::{
+    MeltOperationData, MeltQuote, MeltSagaState, OperationData, Transaction, TransactionDirection,
+    WalletSaga, WalletSagaState,
+};
 use cdk_common::{Error, MeltQuoteBolt11Response, MeltQuoteState, ProofsMethods, State};
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::nuts::Proofs;
-use crate::types::Melted;
+use crate::dhke::construct_proofs;
+use crate::nuts::{MeltRequest, PreMintSecrets, Proofs};
+use crate::types::{Melted, ProofInfo};
 use crate::{Amount, Wallet};
 
 #[cfg(all(feature = "bip353", not(target_arch = "wasm32")))]
@@ -123,7 +128,6 @@ impl<'a> PreparedMelt<'a> {
                 self.quote,
                 self.proofs,
                 self.proofs_to_swap,
-                self.swap_fee,
                 self.input_fee,
                 self.metadata,
             )
@@ -245,9 +249,6 @@ impl Wallet {
             input_fee: prepared_saga.input_fee(),
             metadata,
         };
-
-        // Drop the saga - state is persisted in DB
-        drop(prepared_saga);
 
         Ok(prepared)
     }
@@ -411,19 +412,9 @@ impl Wallet {
         quote: MeltQuote,
         proofs: Proofs,
         proofs_to_swap: Proofs,
-        _swap_fee: Amount,
-        _input_fee: Amount, // Now recalculated from actual final_proofs
+        input_fee: Amount,
         metadata: HashMap<String, String>,
     ) -> Result<ConfirmedMelt, Error> {
-        use cdk_common::amount::SplitTarget;
-        use cdk_common::wallet::{
-            MeltOperationData, MeltSagaState, OperationData, WalletSaga, WalletSagaState,
-        };
-
-        use crate::dhke::construct_proofs;
-        use crate::nuts::{MeltRequest, PreMintSecrets};
-        use crate::types::ProofInfo;
-
         tracing::info!("Confirming melt for operation {}", operation_id);
 
         let active_keyset_id = self.fetch_active_keyset().await?.id;
@@ -431,19 +422,24 @@ impl Wallet {
 
         let mut final_proofs = proofs.clone();
 
-        // Swap if necessary - don't specify amount, take all output
-        // The swap will produce proofs_to_swap.total - swap_fee worth of output
-        // which combined with final_proofs should be enough for the melt
+        // Swap if necessary to get optimal denominations for the melt
+        // We swap for a specific amount to ensure optimal output denominations,
+        // which keeps the actual input_fee matching our estimate.
         if !proofs_to_swap.is_empty() {
+            // Calculate the target amount we need after swap:
+            // quote.amount + fee_reserve + input_fee (the estimated melt input fee)
+            let target_swap_amount = quote_info.amount + quote_info.fee_reserve + input_fee;
+
             tracing::debug!(
-                "Swapping {} proofs (total: {})",
+                "Swapping {} proofs (total: {}) for target amount {}",
                 proofs_to_swap.len(),
-                proofs_to_swap.total_amount()?
+                proofs_to_swap.total_amount()?,
+                target_swap_amount
             );
 
             if let Some(swapped) = self
                 .swap(
-                    None, // Take all output, don't specify amount
+                    Some(target_swap_amount),
                     SplitTarget::None,
                     proofs_to_swap.clone(),
                     None,
@@ -488,9 +484,7 @@ impl Wallet {
             })
             .collect::<Result<Vec<ProofInfo>, _>>()?;
 
-        self.localstore
-            .update_proofs(proofs_info, vec![])
-            .await?;
+        self.localstore.update_proofs(proofs_info, vec![]).await?;
 
         // Calculate change accounting for input fees
         // Note: actual_input_fee was already calculated above for checking if we have enough
@@ -509,12 +503,7 @@ impl Wallet {
 
             let count = new_counter - num_secrets;
 
-            PreMintSecrets::from_seed_blank(
-                active_keyset_id,
-                count,
-                &self.seed,
-                change_amount,
-            )?
+            PreMintSecrets::from_seed_blank(active_keyset_id, count, &self.seed, change_amount)?
         };
 
         let request = MeltRequest::new(
@@ -837,10 +826,7 @@ impl Wallet {
             }
             MeltQuoteState::Failed => {
                 // Payment failed - release proofs
-                tracing::warn!(
-                    "Melt quote {} failed - releasing proofs",
-                    quote_info.id
-                );
+                tracing::warn!("Melt quote {} failed - releasing proofs", quote_info.id);
 
                 let all_ys = final_proofs.ys()?;
                 self.localstore

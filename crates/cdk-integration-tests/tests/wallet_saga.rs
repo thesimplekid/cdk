@@ -270,3 +270,98 @@ async fn test_melt_saga_includes_input_fees() -> Result<()> {
 
     Ok(())
 }
+
+/// Regression test: Melt with swap should account for actual output proof count.
+///
+/// This test reproduces a bug where:
+/// 1. Wallet has many small proofs (non-optimal denominations)
+/// 2. User tries to melt an amount that requires a swap
+/// 3. The swap produces more proofs than the "optimal" estimate
+/// 4. The actual input_fee is higher than estimated
+/// 5. Result: "Insufficient funds" even though wallet has enough balance
+///
+/// The issue was that `estimated_melt_fee` was based on `inputs_needed_amount.split()`
+/// but after swap with `amount=None`, the actual proof count could be higher,
+/// leading to a higher `actual_input_fee`.
+///
+/// Example from real failure:
+/// - inputs_needed_amount = 6700 (optimal split = 7 proofs, fee = 1)
+/// - selection_amount = 6701
+/// - Selected 12 proofs totaling 6703, swap_fee = 2
+/// - After swap: 6701 worth but 13 proofs (not optimal 7!)
+/// - actual_input_fee = 2 (not 1!)
+/// - Need: 6633 + 67 + 2 = 6702, Have: 6701 → Insufficient funds!
+#[tokio::test]
+async fn test_melt_with_swap_non_optimal_proofs() -> Result<()> {
+    use cdk::amount::SplitTarget;
+    use cdk::nuts::CurrencyUnit;
+
+    setup_tracing();
+    let mint = create_and_start_test_mint().await?;
+    let wallet = create_test_wallet_for_mint(mint.clone()).await?;
+
+    // Use a keyset with 100 ppk (0.1 sat per proof, so ~10 proofs = 1 sat fee)
+    // This makes the fee difference noticeable when proof count differs
+    mint.rotate_keyset(
+        CurrencyUnit::Sat,
+        cdk_integration_tests::standard_keyset_amounts(32),
+        100, // 0.1 sat per proof input fee
+    )
+    .await
+    .expect("Failed to rotate keyset");
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Fund wallet with many 1-sat proofs (very non-optimal)
+    // This forces a swap when trying to melt, and the swap output
+    // may have more proofs than the "optimal" estimate
+    let initial_amount = 200u64;
+    fund_wallet(
+        wallet.clone(),
+        initial_amount,
+        Some(SplitTarget::Value(Amount::ONE)),
+    )
+    .await?;
+
+    let initial_balance = wallet.total_balance().await?;
+    assert_eq!(initial_balance, Amount::from(initial_amount));
+
+    // Verify we have many small proofs
+    let proofs = wallet.get_unspent_proofs().await?;
+    tracing::info!("Funded with {} proofs", proofs.len());
+    assert!(
+        proofs.len() > 50,
+        "Should have many small proofs to force non-optimal swap"
+    );
+
+    // Create melt quote - amount chosen to require a swap
+    // With 200 sats in 1-sat proofs, melting 100 sats should require swapping
+    let invoice = create_fake_invoice(100_000, "test melt with non-optimal proofs".to_string());
+    let melt_quote = wallet.melt_quote(invoice.to_string(), None).await?;
+
+    tracing::info!(
+        "Melt quote: amount={}, fee_reserve={}",
+        melt_quote.amount,
+        melt_quote.fee_reserve
+    );
+
+    // This melt should succeed even with non-optimal proofs
+    // Before fix: fails with "Insufficient funds" because actual_input_fee > estimated
+    let melted = wallet.melt(&melt_quote.id).await?;
+
+    assert_eq!(melted.state, MeltQuoteState::Paid);
+    tracing::info!(
+        "Melt succeeded: amount={}, fee_paid={}",
+        melted.amount,
+        melted.fee_paid
+    );
+
+    // Verify balance decreased appropriately
+    let final_balance = wallet.total_balance().await?;
+    assert!(
+        final_balance < initial_balance,
+        "Balance should decrease after melt"
+    );
+
+    Ok(())
+}

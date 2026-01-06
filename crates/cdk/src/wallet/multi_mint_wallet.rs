@@ -290,7 +290,6 @@ impl MultiMintPreparedMelt {
                 self.quote,
                 self.proofs,
                 self.proofs_to_swap,
-                self.swap_fee,
                 self.input_fee,
                 self.metadata,
             )
