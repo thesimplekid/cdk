@@ -189,7 +189,7 @@ async fn test_happy_mint_melt_round_trip() {
         .await
         .unwrap();
     let melt_response = prepared.confirm().await.unwrap();
-    assert!(melt_response.preimage().is_some());
+    assert!(melt_response.payment_proof().is_some());
     assert_eq!(melt_response.state(), MeltQuoteState::Paid);
 
     let txs = wallet.list_transactions(None).await.unwrap();
@@ -622,7 +622,7 @@ async fn test_melt_quote_status_after_melt_multi_mint_wallet() {
         .melt_with_mint(&mint_url, &melt_quote.id)
         .await
         .unwrap();
-    assert_eq!(melt_response.state, MeltQuoteState::Paid);
+    assert_eq!(melt_response.state(), MeltQuoteState::Paid);
 
     let quote_status = multi_mint_wallet
         .check_melt_quote(&mint_url, &melt_quote.id)
@@ -809,5 +809,8 @@ async fn test_pay_invoice_twice() {
 
     let balance = wallet.total_balance().await.unwrap();
 
-    assert_eq!(balance, (Amount::from(100) - melt.fee_paid() - melt.amount()));
+    assert_eq!(
+        balance,
+        (Amount::from(100) - melt.fee_paid() - melt.amount())
+    );
 }

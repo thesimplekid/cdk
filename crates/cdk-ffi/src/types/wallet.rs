@@ -410,7 +410,7 @@ impl From<cdk::types::FinalizedMelt> for FinalizedMelt {
         Self {
             quote_id: finalized.quote_id().to_string(),
             state: finalized.state().into(),
-            preimage: finalized.preimage().map(|s| s.to_string()),
+            preimage: finalized.payment_proof().map(|s| s.to_string()),
             change: finalized
                 .change()
                 .map(|proofs| proofs.iter().cloned().map(|p| p.into()).collect()),

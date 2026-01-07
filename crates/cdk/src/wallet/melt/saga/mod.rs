@@ -919,7 +919,7 @@ impl<'a> MeltSaga<'a, MeltRequested> {
                 state: response.state,
                 amount: quote_info.amount,
                 fee,
-                payment_preimage,
+                payment_proof: payment_preimage,
                 change: change_proofs,
             },
         })
@@ -1065,9 +1065,9 @@ impl<'a> MeltSaga<'a, Finalized> {
         self.state_data.fee
     }
 
-    /// Get the payment preimage (proof of payment)
-    pub fn payment_preimage(&self) -> Option<&str> {
-        self.state_data.payment_preimage.as_deref()
+    /// Get the payment proof (e.g., Lightning preimage)
+    pub fn payment_proof(&self) -> Option<&str> {
+        self.state_data.payment_proof.as_deref()
     }
 
     /// Consume the saga and return the change proofs

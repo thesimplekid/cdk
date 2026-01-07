@@ -18,8 +18,8 @@ pub struct FinalizedMelt {
     quote_id: String,
     /// State of quote
     state: MeltQuoteState,
-    /// Preimage of melt payment
-    preimage: Option<String>,
+    /// Payment proof (e.g., Lightning preimage)
+    payment_proof: Option<String>,
     /// Melt change
     change: Option<Proofs>,
     /// Melt amount
@@ -33,7 +33,7 @@ impl FinalizedMelt {
     pub fn new(
         quote_id: String,
         state: MeltQuoteState,
-        preimage: Option<String>,
+        payment_proof: Option<String>,
         amount: Amount,
         fee_paid: Amount,
         change: Option<Proofs>,
@@ -41,7 +41,7 @@ impl FinalizedMelt {
         Self {
             quote_id,
             state,
-            preimage,
+            payment_proof,
             change,
             amount,
             fee_paid,
@@ -52,7 +52,7 @@ impl FinalizedMelt {
     pub fn from_proofs(
         quote_id: String,
         state: MeltQuoteState,
-        preimage: Option<String>,
+        payment_proof: Option<String>,
         quote_amount: Amount,
         proofs: Proofs,
         change_proofs: Option<Proofs>,
@@ -77,7 +77,7 @@ impl FinalizedMelt {
         Ok(Self {
             quote_id,
             state,
-            preimage,
+            payment_proof,
             change: change_proofs,
             amount: quote_amount,
             fee_paid,
@@ -96,10 +96,10 @@ impl FinalizedMelt {
         self.state
     }
 
-    /// Get the payment preimage
+    /// Get the payment proof (e.g., Lightning preimage)
     #[inline]
-    pub fn preimage(&self) -> Option<&str> {
-        self.preimage.as_deref()
+    pub fn payment_proof(&self) -> Option<&str> {
+        self.payment_proof.as_deref()
     }
 
     /// Get the change proofs

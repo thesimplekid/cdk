@@ -88,8 +88,8 @@ pub struct Finalized {
     pub amount: Amount,
     /// Fee paid for the melt
     pub fee: Amount,
-    /// Payment preimage (proof of payment)
-    pub payment_preimage: Option<String>,
+    /// Payment proof (e.g., Lightning preimage)
+    pub payment_proof: Option<String>,
     /// Change proofs returned from the melt
     pub change: Option<Proofs>,
 }

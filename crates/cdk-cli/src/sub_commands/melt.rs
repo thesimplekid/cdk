@@ -217,12 +217,14 @@ pub async fn pay(
         for (mint_url, melted) in results {
             println!(
                 "  {} - Paid: {}, Fee: {}",
-                mint_url, melted.amount, melted.fee_paid
+                mint_url,
+                melted.amount(),
+                melted.fee_paid()
             );
-            total_paid += melted.amount;
-            total_fees += melted.fee_paid;
+            total_paid += melted.amount();
+            total_fees += melted.fee_paid();
 
-            if let Some(preimage) = melted.preimage {
+            if let Some(preimage) = melted.payment_proof() {
                 println!("    Preimage: {}", preimage);
             }
         }
@@ -270,7 +272,7 @@ pub async fn pay(
                 };
 
                 println!("Payment successful: {:?}", melted);
-                if let Some(preimage) = melted.preimage {
+                if let Some(preimage) = melted.payment_proof() {
                     println!("Payment preimage: {}", preimage);
                 }
             }
@@ -338,7 +340,7 @@ pub async fn pay(
                     confirmed.amount(),
                     confirmed.fee_paid()
                 );
-                if let Some(preimage) = confirmed.preimage() {
+                if let Some(preimage) = confirmed.payment_proof() {
                     println!("Payment preimage: {}", preimage);
                 }
             }
@@ -403,7 +405,7 @@ pub async fn pay(
                     confirmed.amount(),
                     confirmed.fee_paid()
                 );
-                if let Some(preimage) = confirmed.preimage() {
+                if let Some(preimage) = confirmed.payment_proof() {
                     println!("Payment preimage: {}", preimage);
                 }
             }

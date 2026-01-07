@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
                             println!("  Amount paid: {} sats", confirmed.amount());
                             println!("  Fee paid: {} sats", confirmed.fee_paid());
 
-                            if let Some(preimage) = confirmed.preimage() {
+                            if let Some(preimage) = confirmed.payment_proof() {
                                 println!("  Payment preimage: {}", preimage);
                             }
                         }

@@ -117,7 +117,7 @@ impl<'a> PreparedMelt<'a> {
         Ok(FinalizedMelt::new(
             finalized.quote_id().to_string(),
             finalized.state(),
-            finalized.payment_preimage().map(|s| s.to_string()),
+            finalized.payment_proof().map(|s| s.to_string()),
             finalized.amount(),
             finalized.fee(),
             finalized.into_change(),
@@ -321,7 +321,7 @@ impl Wallet {
         Ok(FinalizedMelt::new(
             finalized.quote_id().to_string(),
             finalized.state(),
-            finalized.payment_preimage().map(|s| s.to_string()),
+            finalized.payment_proof().map(|s| s.to_string()),
             finalized.amount(),
             finalized.fee(),
             finalized.into_change(),

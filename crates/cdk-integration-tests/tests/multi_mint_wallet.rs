@@ -156,11 +156,11 @@ async fn test_multi_mint_wallet_melt_auto_select() {
     let melt_result = multi_mint_wallet.melt(&invoice, None, None).await.unwrap();
 
     assert_eq!(
-        melt_result.state,
+        melt_result.state(),
         MeltQuoteState::Paid,
         "Melt should be paid"
     );
-    assert_eq!(melt_result.amount, 50.into(), "Should melt 50 sats");
+    assert_eq!(melt_result.amount(), 50.into(), "Should melt 50 sats");
 
     // Verify balance decreased
     let balance = multi_mint_wallet.total_balance().await.unwrap();
@@ -609,7 +609,7 @@ async fn test_multi_mint_wallet_melt_with_mint() {
         .unwrap();
 
     assert_eq!(
-        melt_result.state,
+        melt_result.state(),
         MeltQuoteState::Paid,
         "Melt should be paid"
     );
