@@ -420,6 +420,146 @@ impl From<cdk::types::FinalizedMelt> for FinalizedMelt {
     }
 }
 
+/// FFI-compatible PreparedMelt
+///
+/// This wraps the data from a prepared melt operation along with a reference
+/// to the wallet. The actual PreparedMelt<'a> from cdk has a lifetime parameter
+/// that doesn't work with FFI, so we store the wallet and cached data separately.
+#[derive(uniffi::Object)]
+pub struct PreparedMelt {
+    wallet: std::sync::Arc<cdk::Wallet>,
+    operation_id: uuid::Uuid,
+    quote: cdk_common::wallet::MeltQuote,
+    proofs: cdk::nuts::Proofs,
+    proofs_to_swap: cdk::nuts::Proofs,
+    swap_fee: Amount,
+    input_fee: Amount,
+    metadata: HashMap<String, String>,
+}
+
+impl std::fmt::Debug for PreparedMelt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedMelt")
+            .field("operation_id", &self.operation_id)
+            .field("quote_id", &self.quote.id)
+            .field("amount", &self.quote.amount)
+            .finish()
+    }
+}
+
+impl PreparedMelt {
+    /// Create a new FFI PreparedMelt from a cdk::wallet::PreparedMelt and wallet
+    pub fn new(
+        wallet: std::sync::Arc<cdk::Wallet>,
+        prepared: &cdk::wallet::PreparedMelt<'_>,
+    ) -> Self {
+        Self {
+            wallet,
+            operation_id: prepared.operation_id(),
+            quote: prepared.quote().clone(),
+            proofs: prepared.proofs().clone(),
+            proofs_to_swap: prepared.proofs_to_swap().clone(),
+            swap_fee: prepared.swap_fee().into(),
+            input_fee: prepared.input_fee().into(),
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl PreparedMelt {
+    /// Get the operation ID for this prepared melt
+    pub fn operation_id(&self) -> String {
+        self.operation_id.to_string()
+    }
+
+    /// Get the quote ID
+    pub fn quote_id(&self) -> String {
+        self.quote.id.clone()
+    }
+
+    /// Get the amount to be melted
+    pub fn amount(&self) -> Amount {
+        self.quote.amount.into()
+    }
+
+    /// Get the fee reserve from the quote
+    pub fn fee_reserve(&self) -> Amount {
+        self.quote.fee_reserve.into()
+    }
+
+    /// Get the swap fee
+    pub fn swap_fee(&self) -> Amount {
+        self.swap_fee
+    }
+
+    /// Get the input fee
+    pub fn input_fee(&self) -> Amount {
+        self.input_fee
+    }
+
+    /// Get the total fee (swap fee + input fee)
+    pub fn total_fee(&self) -> Amount {
+        Amount::new(self.swap_fee.value + self.input_fee.value)
+    }
+
+    /// Get the proofs that will be used
+    pub fn proofs(&self) -> Proofs {
+        self.proofs.iter().cloned().map(|p| p.into()).collect()
+    }
+
+    /// Confirm the prepared melt and execute the payment
+    pub async fn confirm(&self) -> Result<ConfirmedMelt, FfiError> {
+        let confirmed: cdk::wallet::ConfirmedMelt = self
+            .wallet
+            .confirm_prepared_melt(
+                self.operation_id,
+                self.quote.clone(),
+                self.proofs.clone(),
+                self.proofs_to_swap.clone(),
+                self.input_fee.into(),
+                self.metadata.clone(),
+            )
+            .await?;
+
+        Ok(ConfirmedMelt {
+            state: confirmed.state().into(),
+            amount: confirmed.amount().into(),
+            fee: confirmed.fee().into(),
+            payment_preimage: confirmed.payment_preimage().cloned(),
+            change: confirmed.change().map(|proofs| {
+                proofs
+                    .iter()
+                    .cloned()
+                    .map(|p: cdk::nuts::Proof| p.into())
+                    .collect()
+            }),
+        })
+    }
+
+    /// Cancel the prepared melt and release reserved proofs
+    pub async fn cancel(&self) -> Result<(), FfiError> {
+        self.wallet
+            .cancel_prepared_melt(
+                self.operation_id,
+                self.proofs.clone(),
+                self.proofs_to_swap.clone(),
+            )
+            .await?;
+        Ok(())
+    }
+}
+
+/// FFI-compatible ConfirmedMelt result
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConfirmedMelt {
+    pub state: super::quote::QuoteState,
+    pub amount: Amount,
+    pub fee: Amount,
+    pub payment_preimage: Option<String>,
+    pub change: Option<Proofs>,
+}
+
 /// FFI-compatible MeltOptions
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 pub enum MeltOptions {

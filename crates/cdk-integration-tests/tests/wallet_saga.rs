@@ -167,14 +167,23 @@ async fn test_concurrent_melts_isolated() -> Result<()> {
     let quote_id1 = quote1.id.clone();
     let quote_id2 = quote2.id.clone();
 
-    let (result1, result2) = tokio::join!(wallet1.melt(&quote_id1), wallet2.melt(&quote_id2));
+    // Prepare both melts
+    let prepared1 = wallet1
+        .prepare_melt(&quote_id1, std::collections::HashMap::new())
+        .await?;
+    let prepared2 = wallet2
+        .prepare_melt(&quote_id2, std::collections::HashMap::new())
+        .await?;
+
+    // Confirm both in parallel
+    let (result1, result2) = tokio::join!(prepared1.confirm(), prepared2.confirm());
 
     // Both should succeed
-    let melted1 = result1?;
-    let melted2 = result2?;
+    let confirmed1 = result1?;
+    let confirmed2 = result2?;
 
-    assert_eq!(melted1.state, MeltQuoteState::Paid);
-    assert_eq!(melted2.state, MeltQuoteState::Paid);
+    assert_eq!(confirmed1.state(), MeltQuoteState::Paid);
+    assert_eq!(confirmed2.state(), MeltQuoteState::Paid);
 
     // Verify total amount melted
     let final_balance = wallet.total_balance().await?;
@@ -252,13 +261,16 @@ async fn test_melt_saga_includes_input_fees() -> Result<()> {
     // Perform the melt - this should succeed even with input fees
     // Before the fix, this would fail with:
     // "not enough inputs provided for melt. Provided: X, needed: X+1"
-    let melted = wallet.melt(&melt_quote.id).await?;
+    let prepared = wallet
+        .prepare_melt(&melt_quote.id, std::collections::HashMap::new())
+        .await?;
+    let confirmed = prepared.confirm().await?;
 
-    assert_eq!(melted.state, MeltQuoteState::Paid);
+    assert_eq!(confirmed.state(), MeltQuoteState::Paid);
     tracing::info!(
         "Melt succeeded: amount={}, fee_paid={}",
-        melted.amount,
-        melted.fee_paid
+        confirmed.amount(),
+        confirmed.fee()
     );
 
     // Verify final balance makes sense
@@ -347,13 +359,16 @@ async fn test_melt_with_swap_non_optimal_proofs() -> Result<()> {
 
     // This melt should succeed even with non-optimal proofs
     // Before fix: fails with "Insufficient funds" because actual_input_fee > estimated
-    let melted = wallet.melt(&melt_quote.id).await?;
+    let prepared = wallet
+        .prepare_melt(&melt_quote.id, std::collections::HashMap::new())
+        .await?;
+    let confirmed = prepared.confirm().await?;
 
-    assert_eq!(melted.state, MeltQuoteState::Paid);
+    assert_eq!(confirmed.state(), MeltQuoteState::Paid);
     tracing::info!(
         "Melt succeeded: amount={}, fee_paid={}",
-        melted.amount,
-        melted.fee_paid
+        confirmed.amount(),
+        confirmed.fee()
     );
 
     // Verify balance decreased appropriately

@@ -324,12 +324,21 @@ pub async fn pay(
                 println!("  Expiry: {}", quote.expiry);
 
                 // Execute the melt
-                let melted = wallet.melt(&quote.id).await?;
+                let prepared = wallet
+                    .prepare_melt(&quote.id, std::collections::HashMap::new())
+                    .await?;
+                println!(
+                    "Prepared melt - Amount: {}, Fee: {}",
+                    prepared.amount(),
+                    prepared.total_fee()
+                );
+                let confirmed = prepared.confirm().await?;
                 println!(
                     "Payment successful: Paid {} with fee {}",
-                    melted.amount, melted.fee_paid
+                    confirmed.amount(),
+                    confirmed.fee()
                 );
-                if let Some(preimage) = melted.preimage {
+                if let Some(preimage) = confirmed.payment_preimage() {
                     println!("Payment preimage: {}", preimage);
                 }
             }
@@ -380,12 +389,21 @@ pub async fn pay(
                 println!("  Expiry: {}", quote.expiry);
 
                 // Execute the melt
-                let melted = wallet.melt(&quote.id).await?;
+                let prepared = wallet
+                    .prepare_melt(&quote.id, std::collections::HashMap::new())
+                    .await?;
+                println!(
+                    "Prepared melt - Amount: {}, Fee: {}",
+                    prepared.amount(),
+                    prepared.total_fee()
+                );
+                let confirmed = prepared.confirm().await?;
                 println!(
                     "Payment successful: Paid {} with fee {}",
-                    melted.amount, melted.fee_paid
+                    confirmed.amount(),
+                    confirmed.fee()
                 );
-                if let Some(preimage) = melted.preimage {
+                if let Some(preimage) = confirmed.payment_preimage() {
                     println!("Payment preimage: {}", preimage);
                 }
             }

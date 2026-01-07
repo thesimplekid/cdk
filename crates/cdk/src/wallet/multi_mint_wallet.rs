@@ -1280,7 +1280,18 @@ impl MultiMintWallet {
             .await;
 
         // Step 2: Melt from source wallet using the final melt quote
-        let melted = source_wallet.melt(&final_melt_quote.id).await?;
+        let prepared = source_wallet
+            .prepare_melt(&final_melt_quote.id, std::collections::HashMap::new())
+            .await?;
+        let confirmed = prepared.confirm().await?;
+        let melted = FinalizedMelt {
+            quote_id: final_melt_quote.id.clone(),
+            state: confirmed.state(),
+            preimage: confirmed.payment_preimage().cloned(),
+            amount: confirmed.amount(),
+            fee_paid: confirmed.fee(),
+            change: confirmed.change().cloned(),
+        };
 
         // Step 3: Wait for payment confirmation via subscription
         tracing::debug!(
@@ -1736,18 +1747,37 @@ impl MultiMintWallet {
     }
 
     /// Melt (pay invoice) from a specific mint using a quote ID
+    ///
+    /// For more control over fees, use `prepare_melt()` instead.
     #[instrument(skip(self))]
     pub async fn melt_with_mint(
         &self,
         mint_url: &MintUrl,
         quote_id: &str,
     ) -> Result<FinalizedMelt, Error> {
-        let wallets = self.wallets.read().await;
-        let wallet = wallets.get(mint_url).ok_or(Error::UnknownMint {
-            mint_url: mint_url.to_string(),
-        })?;
+        let wallet = {
+            let wallets = self.wallets.read().await;
+            wallets
+                .get(mint_url)
+                .ok_or(Error::UnknownMint {
+                    mint_url: mint_url.to_string(),
+                })?
+                .clone()
+        };
 
-        wallet.melt(quote_id).await
+        let prepared = wallet
+            .prepare_melt(quote_id, std::collections::HashMap::new())
+            .await?;
+        let confirmed = prepared.confirm().await?;
+
+        Ok(FinalizedMelt {
+            quote_id: quote_id.to_string(),
+            state: confirmed.state(),
+            preimage: confirmed.payment_preimage().cloned(),
+            amount: confirmed.amount(),
+            fee_paid: confirmed.fee(),
+            change: confirmed.change().cloned(),
+        })
     }
 
     /// Melt specific proofs from a specific mint using a quote ID
@@ -1772,12 +1802,29 @@ impl MultiMintWallet {
         quote_id: &str,
         proofs: Proofs,
     ) -> Result<FinalizedMelt, Error> {
-        let wallets = self.wallets.read().await;
-        let wallet = wallets.get(mint_url).ok_or(Error::UnknownMint {
-            mint_url: mint_url.to_string(),
-        })?;
+        let wallet = {
+            let wallets = self.wallets.read().await;
+            wallets
+                .get(mint_url)
+                .ok_or(Error::UnknownMint {
+                    mint_url: mint_url.to_string(),
+                })?
+                .clone()
+        };
 
-        wallet.melt_proofs(quote_id, proofs).await
+        let prepared = wallet
+            .prepare_melt_proofs(quote_id, proofs, std::collections::HashMap::new())
+            .await?;
+        let confirmed = prepared.confirm().await?;
+
+        Ok(FinalizedMelt {
+            quote_id: quote_id.to_string(),
+            state: confirmed.state(),
+            preimage: confirmed.payment_preimage().cloned(),
+            amount: confirmed.amount(),
+            fee_paid: confirmed.fee(),
+            change: confirmed.change().cloned(),
+        })
     }
 
     /// Check a specific melt quote status
@@ -1887,8 +1934,22 @@ impl MultiMintWallet {
             let mint_url_clone = mint_url.clone();
 
             let task = spawn(async move {
-                let melted = wallet.melt(&quote_id).await;
-                (mint_url_clone, melted)
+                let result = async {
+                    let prepared = wallet
+                        .prepare_melt(&quote_id, std::collections::HashMap::new())
+                        .await?;
+                    let confirmed = prepared.confirm().await?;
+                    Ok::<_, Error>(FinalizedMelt {
+                        quote_id: quote_id.clone(),
+                        state: confirmed.state(),
+                        preimage: confirmed.payment_preimage().cloned(),
+                        amount: confirmed.amount(),
+                        fee_paid: confirmed.fee(),
+                        change: confirmed.change().cloned(),
+                    })
+                }
+                .await;
+                (mint_url_clone, result)
             });
 
             tasks.push(task);
@@ -2042,7 +2103,18 @@ impl MultiMintWallet {
         }
 
         if let (Some(quote), Some(wallet)) = (best_quote, best_wallet) {
-            return wallet.melt(&quote.id).await;
+            let prepared = wallet
+                .prepare_melt(&quote.id, std::collections::HashMap::new())
+                .await?;
+            let confirmed = prepared.confirm().await?;
+            return Ok(FinalizedMelt {
+                quote_id: quote.id,
+                state: confirmed.state(),
+                preimage: confirmed.payment_preimage().cloned(),
+                amount: confirmed.amount(),
+                fee_paid: confirmed.fee(),
+                change: confirmed.change().cloned(),
+            });
         }
 
         Err(Error::InsufficientFunds)

@@ -4,16 +4,10 @@
 //!
 //! # Usage
 //!
-//! ## Simple melt (convenience method)
-//! ```rust,no_run
-//! # async fn example(wallet: &cdk::wallet::Wallet) -> anyhow::Result<()> {
-//! let quote = wallet.melt_quote("lnbc...".to_string(), None).await?;
-//! let melted = wallet.melt(&quote.id).await?;
-//! # Ok(())
-//! # }
-//! ```
+//! Use [`Wallet::prepare_melt`] to create a [`PreparedMelt`], then call
+//! [`confirm`](PreparedMelt::confirm) to complete the melt or
+//! [`cancel`](PreparedMelt::cancel) to release reserved proofs.
 //!
-//! ## Two-phase melt (prepare then confirm)
 //! ```rust,no_run
 //! # async fn example(wallet: &cdk::wallet::Wallet) -> anyhow::Result<()> {
 //! use std::collections::HashMap;
@@ -237,51 +231,6 @@ impl Wallet {
         })
     }
 
-    /// Melt tokens to pay a Lightning invoice.
-    ///
-    /// This is a convenience method that prepares and confirms the melt in one step.
-    /// For more control, use `prepare_melt()` instead.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// # async fn example(wallet: &cdk::wallet::Wallet) -> anyhow::Result<()> {
-    /// let quote = wallet.melt_quote("lnbc...".to_string(), None).await?;
-    /// let melted = wallet.melt(&quote.id).await?;
-    /// println!("Paid {} sats, fee: {} sats", melted.amount, melted.fee_paid);
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[instrument(skip(self))]
-    pub async fn melt(&self, quote_id: &str) -> Result<FinalizedMelt, Error> {
-        self.melt_with_metadata(quote_id, HashMap::new()).await
-    }
-
-    /// Melt tokens with additional metadata saved with the transaction.
-    ///
-    /// Like `melt()`, but allows attaching custom metadata to the transaction record.
-    ///
-    /// Note: The returned `FinalizedMelt` struct contains the actual state from the mint.
-    /// If `state` is `Pending`, the payment is in-flight and will complete later.
-    /// Call `finalize_pending_melts()` to finalize pending melts.
-    #[instrument(skip(self, metadata))]
-    pub async fn melt_with_metadata(
-        &self,
-        quote_id: &str,
-        metadata: HashMap<String, String>,
-    ) -> Result<FinalizedMelt, Error> {
-        let prepared = self.prepare_melt(quote_id, metadata).await?;
-        let confirmed = prepared.confirm().await?;
-
-        Ok(FinalizedMelt {
-            quote_id: quote_id.to_string(),
-            state: confirmed.state(),
-            preimage: confirmed.payment_preimage().cloned(),
-            amount: confirmed.amount(),
-            fee_paid: confirmed.fee(),
-            change: confirmed.change().cloned(),
-        })
-    }
-
     /// Prepare a melt operation with specific proofs.
     ///
     /// Unlike `prepare_melt()`, this method uses the provided proofs directly
@@ -318,50 +267,6 @@ impl Wallet {
         Ok(PreparedMelt {
             saga: prepared_saga,
             metadata,
-        })
-    }
-
-    /// Melt specific proofs to pay a Lightning invoice.
-    ///
-    /// Unlike `melt()`, this method uses the provided proofs directly without
-    /// automatic proof selection.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// # async fn example(wallet: &cdk::wallet::Wallet, proofs: cdk::nuts::Proofs) -> anyhow::Result<()> {
-    /// let quote = wallet.melt_quote("lnbc...".to_string(), None).await?;
-    /// let melted = wallet.melt_proofs(&quote.id, proofs).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[instrument(skip(self, proofs))]
-    pub async fn melt_proofs(
-        &self,
-        quote_id: &str,
-        proofs: crate::nuts::Proofs,
-    ) -> Result<FinalizedMelt, Error> {
-        self.melt_proofs_with_metadata(quote_id, proofs, HashMap::new())
-            .await
-    }
-
-    /// Melt specific proofs with additional metadata saved with the transaction.
-    #[instrument(skip(self, proofs, metadata))]
-    pub async fn melt_proofs_with_metadata(
-        &self,
-        quote_id: &str,
-        proofs: crate::nuts::Proofs,
-        metadata: HashMap<String, String>,
-    ) -> Result<FinalizedMelt, Error> {
-        let prepared = self.prepare_melt_proofs(quote_id, proofs, metadata).await?;
-        let confirmed = prepared.confirm().await?;
-
-        Ok(FinalizedMelt {
-            quote_id: quote_id.to_string(),
-            state: confirmed.state(),
-            preimage: confirmed.payment_preimage().cloned(),
-            amount: confirmed.amount(),
-            fee_paid: confirmed.fee(),
-            change: confirmed.change().cloned(),
         })
     }
 
@@ -429,7 +334,7 @@ impl Wallet {
         Ok(results)
     }
 
-    /// Confirm a prepared melt with already-reserved proofs (internal helper for Arc<Wallet>).
+    /// Confirm a prepared melt with already-reserved proofs.
     ///
     /// This is used by `MultiMintPreparedMelt::confirm` which holds an `Arc<Wallet>`
     /// and has already prepared/reserved proofs. For the normal API path, use
@@ -438,7 +343,7 @@ impl Wallet {
     /// The `operation_id` and `quote` must correspond to an existing prepared saga.
     #[instrument(skip(self, proofs, proofs_to_swap, metadata))]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn confirm_prepared_melt(
+    pub async fn confirm_prepared_melt(
         &self,
         operation_id: Uuid,
         quote: MeltQuote,
@@ -470,11 +375,11 @@ impl Wallet {
         })
     }
 
-    /// Cancel a prepared melt and release reserved proofs (internal helper).
+    /// Cancel a prepared melt and release reserved proofs.
     ///
     /// This is used by `MultiMintPreparedMelt::cancel` which holds an `Arc<Wallet>`.
     #[instrument(skip(self, proofs, proofs_to_swap))]
-    pub(crate) async fn cancel_prepared_melt(
+    pub async fn cancel_prepared_melt(
         &self,
         operation_id: Uuid,
         proofs: Proofs,
