@@ -270,7 +270,7 @@ async fn test_melt_saga_includes_input_fees() -> Result<()> {
     tracing::info!(
         "Melt succeeded: amount={}, fee_paid={}",
         confirmed.amount(),
-        confirmed.fee()
+        confirmed.fee_paid()
     );
 
     // Verify final balance makes sense
@@ -368,7 +368,7 @@ async fn test_melt_with_swap_non_optimal_proofs() -> Result<()> {
     tracing::info!(
         "Melt succeeded: amount={}, fee_paid={}",
         confirmed.amount(),
-        confirmed.fee()
+        confirmed.fee_paid()
     );
 
     // Verify balance decreased appropriately

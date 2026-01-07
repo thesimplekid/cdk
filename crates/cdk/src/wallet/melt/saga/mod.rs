@@ -915,6 +915,7 @@ impl<'a> MeltSaga<'a, MeltRequested> {
             wallet: self.wallet,
             compensations: self.compensations,
             state_data: Finalized {
+                quote_id: quote_info.id.clone(),
                 state: response.state,
                 amount: quote_info.amount,
                 fee,
@@ -1044,6 +1045,11 @@ impl<'a> MeltSaga<'a, MeltRequested> {
 }
 
 impl<'a> MeltSaga<'a, Finalized> {
+    /// Get the quote ID
+    pub fn quote_id(&self) -> &str {
+        &self.state_data.quote_id
+    }
+
     /// Get the melt quote state
     pub fn state(&self) -> MeltQuoteState {
         self.state_data.state

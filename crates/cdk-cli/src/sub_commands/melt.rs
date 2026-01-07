@@ -336,9 +336,9 @@ pub async fn pay(
                 println!(
                     "Payment successful: Paid {} with fee {}",
                     confirmed.amount(),
-                    confirmed.fee()
+                    confirmed.fee_paid()
                 );
-                if let Some(preimage) = confirmed.payment_preimage() {
+                if let Some(preimage) = confirmed.preimage() {
                     println!("Payment preimage: {}", preimage);
                 }
             }
@@ -401,9 +401,9 @@ pub async fn pay(
                 println!(
                     "Payment successful: Paid {} with fee {}",
                     confirmed.amount(),
-                    confirmed.fee()
+                    confirmed.fee_paid()
                 );
-                if let Some(preimage) = confirmed.payment_preimage() {
+                if let Some(preimage) = confirmed.preimage() {
                     println!("Payment preimage: {}", preimage);
                 }
             }

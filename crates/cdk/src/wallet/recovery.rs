@@ -211,7 +211,7 @@ impl Wallet {
                     self.resume_melt_saga(&saga).await.map(|opt| match opt {
                         Some(finalized) => {
                             use cdk_common::MeltQuoteState;
-                            if finalized.state == MeltQuoteState::Paid {
+                            if finalized.state() == MeltQuoteState::Paid {
                                 RecoveryAction::Recovered
                             } else {
                                 RecoveryAction::Compensated

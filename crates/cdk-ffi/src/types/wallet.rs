@@ -408,14 +408,14 @@ pub struct FinalizedMelt {
 impl From<cdk::types::FinalizedMelt> for FinalizedMelt {
     fn from(finalized: cdk::types::FinalizedMelt) -> Self {
         Self {
-            quote_id: finalized.quote_id,
-            state: finalized.state.into(),
-            preimage: finalized.preimage,
+            quote_id: finalized.quote_id().to_string(),
+            state: finalized.state().into(),
+            preimage: finalized.preimage().map(|s| s.to_string()),
             change: finalized
-                .change
-                .map(|proofs| proofs.into_iter().map(|p| p.into()).collect()),
-            amount: finalized.amount.into(),
-            fee_paid: finalized.fee_paid.into(),
+                .change()
+                .map(|proofs| proofs.iter().cloned().map(|p| p.into()).collect()),
+            amount: finalized.amount().into(),
+            fee_paid: finalized.fee_paid().into(),
         }
     }
 }
@@ -509,8 +509,8 @@ impl PreparedMelt {
     }
 
     /// Confirm the prepared melt and execute the payment
-    pub async fn confirm(&self) -> Result<ConfirmedMelt, FfiError> {
-        let confirmed: cdk::wallet::ConfirmedMelt = self
+    pub async fn confirm(&self) -> Result<FinalizedMelt, FfiError> {
+        let finalized = self
             .wallet
             .confirm_prepared_melt(
                 self.operation_id,
@@ -522,19 +522,7 @@ impl PreparedMelt {
             )
             .await?;
 
-        Ok(ConfirmedMelt {
-            state: confirmed.state().into(),
-            amount: confirmed.amount().into(),
-            fee: confirmed.fee().into(),
-            payment_preimage: confirmed.payment_preimage().cloned(),
-            change: confirmed.change().map(|proofs| {
-                proofs
-                    .iter()
-                    .cloned()
-                    .map(|p: cdk::nuts::Proof| p.into())
-                    .collect()
-            }),
-        })
+        Ok(finalized.into())
     }
 
     /// Cancel the prepared melt and release reserved proofs
@@ -548,16 +536,6 @@ impl PreparedMelt {
             .await?;
         Ok(())
     }
-}
-
-/// FFI-compatible ConfirmedMelt result
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct ConfirmedMelt {
-    pub state: super::quote::QuoteState,
-    pub amount: Amount,
-    pub fee: Amount,
-    pub payment_preimage: Option<String>,
-    pub change: Option<Proofs>,
 }
 
 /// FFI-compatible MeltOptions

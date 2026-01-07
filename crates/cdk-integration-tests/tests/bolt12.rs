@@ -252,14 +252,14 @@ async fn test_regtest_bolt12_multiple_wallets() -> Result<()> {
         .await?;
     let melted = prepared_one.confirm().await?;
 
-    assert!(melted.payment_preimage().is_some());
+    assert!(melted.preimage().is_some());
 
     let prepared_two = wallet_two
         .prepare_melt(&wallet_two_melt_quote.id, std::collections::HashMap::new())
         .await?;
     let melted_two = prepared_two.confirm().await?;
 
-    assert!(melted_two.payment_preimage().is_some());
+    assert!(melted_two.preimage().is_some());
 
     Ok(())
 }

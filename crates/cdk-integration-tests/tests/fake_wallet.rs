@@ -407,7 +407,7 @@ async fn test_fake_melt_payment_err_paid() {
         .unwrap();
     let melt = prepared.confirm().await.unwrap();
 
-    assert!(melt.fee() == Amount::ZERO);
+    assert!(melt.fee_paid() == Amount::ZERO);
     assert!(melt.amount() == Amount::from(7));
 
     // melt failed, but there is new code to reclaim unspent proofs
@@ -1783,7 +1783,7 @@ async fn test_melt_proofs_external() {
 
     // Verify the melt succeeded
     assert_eq!(melted.amount(), Amount::from(9));
-    assert_eq!(melted.fee(), 1.into());
+    assert_eq!(melted.fee_paid(), 1.into());
 
     // Verify change was returned (100 input - 9 melt amount = 91 change, minus fee reserve)
     assert!(melted.change().is_some());
@@ -1866,7 +1866,7 @@ async fn test_melt_with_swap_for_exact_amount() {
     tracing::info!(
         "Melt completed: amount={}, fee_paid={}",
         melted.amount(),
-        melted.fee()
+        melted.fee_paid()
     );
 
     // Verify final balance is correct (initial - melt_amount - fees)
@@ -1875,7 +1875,7 @@ async fn test_melt_with_swap_for_exact_amount() {
         "Balance: initial={}, final={}, paid={}",
         initial_balance,
         final_balance,
-        melted.amount() + melted.fee()
+        melted.amount() + melted.fee_paid()
     );
 
     assert!(
@@ -1884,7 +1884,7 @@ async fn test_melt_with_swap_for_exact_amount() {
     );
     assert_eq!(
         final_balance,
-        initial_balance - melted.amount() - melted.fee(),
+        initial_balance - melted.amount() - melted.fee_paid(),
         "Final balance should be initial - amount - fees"
     );
 }
@@ -1934,7 +1934,7 @@ async fn test_melt_exact_proofs_no_swap_needed() {
     let final_balance = wallet.total_balance().await.unwrap();
     assert_eq!(
         final_balance,
-        initial_balance - melted.amount() - melted.fee()
+        initial_balance - melted.amount() - melted.fee_paid()
     );
 }
 

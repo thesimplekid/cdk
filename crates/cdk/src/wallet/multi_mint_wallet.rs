@@ -283,7 +283,7 @@ impl MultiMintPreparedMelt {
     }
 
     /// Confirm the prepared melt and execute the payment
-    pub async fn confirm(self) -> Result<super::melt::ConfirmedMelt, Error> {
+    pub async fn confirm(self) -> Result<FinalizedMelt, Error> {
         self.wallet
             .confirm_prepared_melt(
                 self.operation_id,
@@ -1180,7 +1180,7 @@ impl MultiMintWallet {
         let target_balance_final = target_wallet.total_balance().await?;
 
         let amount_sent = source_balance_initial - source_balance_final;
-        let fees_paid = melted.fee_paid;
+        let fees_paid = melted.fee_paid();
 
         tracing::info!(
             "Transferred {} from {} to {} via Lightning (sent: {} sats, received: {} sats, fee: {} sats)",
@@ -1283,15 +1283,7 @@ impl MultiMintWallet {
         let prepared = source_wallet
             .prepare_melt(&final_melt_quote.id, std::collections::HashMap::new())
             .await?;
-        let confirmed = prepared.confirm().await?;
-        let melted = FinalizedMelt {
-            quote_id: final_melt_quote.id.clone(),
-            state: confirmed.state(),
-            preimage: confirmed.payment_preimage().cloned(),
-            amount: confirmed.amount(),
-            fee_paid: confirmed.fee(),
-            change: confirmed.change().cloned(),
-        };
+        let melted = prepared.confirm().await?;
 
         // Step 3: Wait for payment confirmation via subscription
         tracing::debug!(
@@ -1768,16 +1760,7 @@ impl MultiMintWallet {
         let prepared = wallet
             .prepare_melt(quote_id, std::collections::HashMap::new())
             .await?;
-        let confirmed = prepared.confirm().await?;
-
-        Ok(FinalizedMelt {
-            quote_id: quote_id.to_string(),
-            state: confirmed.state(),
-            preimage: confirmed.payment_preimage().cloned(),
-            amount: confirmed.amount(),
-            fee_paid: confirmed.fee(),
-            change: confirmed.change().cloned(),
-        })
+        prepared.confirm().await
     }
 
     /// Melt specific proofs from a specific mint using a quote ID
@@ -1815,16 +1798,7 @@ impl MultiMintWallet {
         let prepared = wallet
             .prepare_melt_proofs(quote_id, proofs, std::collections::HashMap::new())
             .await?;
-        let confirmed = prepared.confirm().await?;
-
-        Ok(FinalizedMelt {
-            quote_id: quote_id.to_string(),
-            state: confirmed.state(),
-            preimage: confirmed.payment_preimage().cloned(),
-            amount: confirmed.amount(),
-            fee_paid: confirmed.fee(),
-            change: confirmed.change().cloned(),
-        })
+        prepared.confirm().await
     }
 
     /// Check a specific melt quote status
@@ -1938,15 +1912,7 @@ impl MultiMintWallet {
                     let prepared = wallet
                         .prepare_melt(&quote_id, std::collections::HashMap::new())
                         .await?;
-                    let confirmed = prepared.confirm().await?;
-                    Ok::<_, Error>(FinalizedMelt {
-                        quote_id: quote_id.clone(),
-                        state: confirmed.state(),
-                        preimage: confirmed.payment_preimage().cloned(),
-                        amount: confirmed.amount(),
-                        fee_paid: confirmed.fee(),
-                        change: confirmed.change().cloned(),
-                    })
+                    prepared.confirm().await
                 }
                 .await;
                 (mint_url_clone, result)
@@ -2106,15 +2072,7 @@ impl MultiMintWallet {
             let prepared = wallet
                 .prepare_melt(&quote.id, std::collections::HashMap::new())
                 .await?;
-            let confirmed = prepared.confirm().await?;
-            return Ok(FinalizedMelt {
-                quote_id: quote.id,
-                state: confirmed.state(),
-                preimage: confirmed.payment_preimage().cloned(),
-                amount: confirmed.amount(),
-                fee_paid: confirmed.fee(),
-                change: confirmed.change().cloned(),
-            });
+            return prepared.confirm().await;
         }
 
         Err(Error::InsufficientFunds)

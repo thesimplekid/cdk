@@ -12,24 +12,43 @@ use crate::nuts::{
 use crate::Amount;
 
 /// Result of a finalized melt operation
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FinalizedMelt {
     /// Quote ID
-    pub quote_id: String,
+    quote_id: String,
     /// State of quote
-    pub state: MeltQuoteState,
+    state: MeltQuoteState,
     /// Preimage of melt payment
-    pub preimage: Option<String>,
+    preimage: Option<String>,
     /// Melt change
-    pub change: Option<Proofs>,
+    change: Option<Proofs>,
     /// Melt amount
-    pub amount: Amount,
+    amount: Amount,
     /// Fee paid
-    pub fee_paid: Amount,
+    fee_paid: Amount,
 }
 
 impl FinalizedMelt {
     /// Create new [`FinalizedMelt`]
+    pub fn new(
+        quote_id: String,
+        state: MeltQuoteState,
+        preimage: Option<String>,
+        amount: Amount,
+        fee_paid: Amount,
+        change: Option<Proofs>,
+    ) -> Self {
+        Self {
+            quote_id,
+            state,
+            preimage,
+            change,
+            amount,
+            fee_paid,
+        }
+    }
+
+    /// Create new [`FinalizedMelt`] calculating fee from proofs
     pub fn from_proofs(
         quote_id: String,
         state: MeltQuoteState,
@@ -65,9 +84,63 @@ impl FinalizedMelt {
         })
     }
 
-    /// Total amount melted
+    /// Get the quote ID
+    #[inline]
+    pub fn quote_id(&self) -> &str {
+        &self.quote_id
+    }
+
+    /// Get the state of the melt
+    #[inline]
+    pub fn state(&self) -> MeltQuoteState {
+        self.state
+    }
+
+    /// Get the payment preimage
+    #[inline]
+    pub fn preimage(&self) -> Option<&str> {
+        self.preimage.as_deref()
+    }
+
+    /// Get the change proofs
+    #[inline]
+    pub fn change(&self) -> Option<&Proofs> {
+        self.change.as_ref()
+    }
+
+    /// Consume self and return the change proofs
+    #[inline]
+    pub fn into_change(self) -> Option<Proofs> {
+        self.change
+    }
+
+    /// Get the amount melted
+    #[inline]
+    pub fn amount(&self) -> Amount {
+        self.amount
+    }
+
+    /// Get the fee paid
+    #[inline]
+    pub fn fee_paid(&self) -> Amount {
+        self.fee_paid
+    }
+
+    /// Total amount melted (amount + fee)
+    #[inline]
     pub fn total_amount(&self) -> Amount {
         self.amount + self.fee_paid
+    }
+}
+
+impl std::fmt::Debug for FinalizedMelt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FinalizedMelt")
+            .field("quote_id", &self.quote_id)
+            .field("state", &self.state)
+            .field("amount", &self.amount)
+            .field("fee_paid", &self.fee_paid)
+            .finish()
     }
 }
 
@@ -263,9 +336,9 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(finalized.quote_id, "test_quote_id");
-        assert_eq!(finalized.amount, Amount::from(64));
-        assert_eq!(finalized.fee_paid, Amount::ZERO);
+        assert_eq!(finalized.quote_id(), "test_quote_id");
+        assert_eq!(finalized.amount(), Amount::from(64));
+        assert_eq!(finalized.fee_paid(), Amount::ZERO);
         assert_eq!(finalized.total_amount(), Amount::from(64));
     }
 
@@ -299,9 +372,9 @@ mod tests {
             Some(vec![change_proof.clone()]),
         )
         .unwrap();
-        assert_eq!(finalized.quote_id, "test_quote_id");
-        assert_eq!(finalized.amount, Amount::from(31));
-        assert_eq!(finalized.fee_paid, Amount::from(1));
+        assert_eq!(finalized.quote_id(), "test_quote_id");
+        assert_eq!(finalized.amount(), Amount::from(31));
+        assert_eq!(finalized.fee_paid(), Amount::from(1));
         assert_eq!(finalized.total_amount(), Amount::from(32));
     }
 

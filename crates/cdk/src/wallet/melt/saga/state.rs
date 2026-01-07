@@ -80,6 +80,8 @@ pub struct MeltRequested {
 /// The saga transitions to this state after a successful melt.
 /// Accessor methods provide the result data.
 pub struct Finalized {
+    /// Quote ID
+    pub quote_id: String,
     /// The state of the melt quote (Paid)
     pub state: MeltQuoteState,
     /// Amount that was melted

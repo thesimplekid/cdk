@@ -141,9 +141,9 @@ async fn main() -> anyhow::Result<()> {
                             println!("✓ BIP-353 payment successful!");
                             println!("  State: {:?}", confirmed.state());
                             println!("  Amount paid: {} sats", confirmed.amount());
-                            println!("  Fee paid: {} sats", confirmed.fee());
+                            println!("  Fee paid: {} sats", confirmed.fee_paid());
 
-                            if let Some(preimage) = confirmed.payment_preimage() {
+                            if let Some(preimage) = confirmed.preimage() {
                                 println!("  Payment preimage: {}", preimage);
                             }
                         }
@@ -218,9 +218,9 @@ async fn main() -> anyhow::Result<()> {
                             println!("✓ Lightning Address payment successful!");
                             println!("  State: {:?}", confirmed.state());
                             println!("  Amount paid: {} sats", confirmed.amount());
-                            println!("  Fee paid: {} sats", confirmed.fee());
+                            println!("  Fee paid: {} sats", confirmed.fee_paid());
 
-                            if let Some(preimage) = confirmed.payment_preimage() {
+                            if let Some(preimage) = confirmed.preimage() {
                                 println!("  Payment preimage: {}", preimage);
                             }
                         }

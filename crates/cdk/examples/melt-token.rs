@@ -86,7 +86,7 @@ async fn main() -> Result<(), Error> {
         "Melted: state={:?}, amount={}, fee={}",
         confirmed.state(),
         confirmed.amount(),
-        confirmed.fee()
+        confirmed.fee_paid()
     );
 
     Ok(())

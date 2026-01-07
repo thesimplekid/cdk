@@ -107,20 +107,21 @@ impl<'a> PreparedMelt<'a> {
     /// Confirm the prepared melt and execute the payment.
     ///
     /// This transitions the saga through: Prepared -> MeltRequested -> Finalized
-    pub async fn confirm(self) -> Result<ConfirmedMelt, Error> {
+    pub async fn confirm(self) -> Result<FinalizedMelt, Error> {
         // Transition to MeltRequested state (handles swap if needed)
         let melt_requested = self.saga.request_melt().await?;
 
         // Execute the melt request and get Finalized saga
         let finalized = melt_requested.execute(self.metadata).await?;
 
-        Ok(ConfirmedMelt {
-            state: finalized.state(),
-            amount: finalized.amount(),
-            fee: finalized.fee(),
-            payment_preimage: finalized.payment_preimage().map(|s| s.to_string()),
-            change: finalized.into_change(),
-        })
+        Ok(FinalizedMelt::new(
+            finalized.quote_id().to_string(),
+            finalized.state(),
+            finalized.payment_preimage().map(|s| s.to_string()),
+            finalized.amount(),
+            finalized.fee(),
+            finalized.into_change(),
+        ))
     }
 
     /// Cancel the prepared melt and release reserved proofs
@@ -136,55 +137,6 @@ impl Debug for PreparedMelt<'_> {
             .field("quote_id", &self.saga.quote().id)
             .field("amount", &self.saga.quote().amount)
             .field("total_fee", &self.total_fee())
-            .finish()
-    }
-}
-
-/// A confirmed melt operation.
-///
-/// This is the result of calling [`PreparedMelt::confirm`]. The payment has been
-/// executed (or is pending).
-pub struct ConfirmedMelt {
-    state: MeltQuoteState,
-    amount: Amount,
-    fee: Amount,
-    payment_preimage: Option<String>,
-    change: Option<Proofs>,
-}
-
-impl ConfirmedMelt {
-    /// Get the state of the melt (Paid, Pending, etc.)
-    pub fn state(&self) -> MeltQuoteState {
-        self.state
-    }
-
-    /// Get the amount melted
-    pub fn amount(&self) -> Amount {
-        self.amount
-    }
-
-    /// Get the fee paid
-    pub fn fee(&self) -> Amount {
-        self.fee
-    }
-
-    /// Get the payment preimage
-    pub fn payment_preimage(&self) -> Option<&String> {
-        self.payment_preimage.as_ref()
-    }
-
-    /// Get the change proofs returned from the melt
-    pub fn change(&self) -> Option<&Proofs> {
-        self.change.as_ref()
-    }
-}
-
-impl Debug for ConfirmedMelt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConfirmedMelt")
-            .field("state", &self.state)
-            .field("amount", &self.amount)
-            .field("fee", &self.fee)
             .finish()
     }
 }
@@ -317,7 +269,7 @@ impl Wallet {
                     tracing::info!(
                         "Melt {} finalized with state {:?}",
                         saga.id,
-                        melted.state
+                        melted.state()
                     );
                     results.push(melted);
                 }
@@ -351,7 +303,7 @@ impl Wallet {
         proofs_to_swap: Proofs,
         input_fee: Amount,
         metadata: HashMap<String, String>,
-    ) -> Result<ConfirmedMelt, Error> {
+    ) -> Result<FinalizedMelt, Error> {
         // Create a saga in Prepared state and continue from there
         // We reconstruct the Prepared state from the stored data
         let saga = MeltSaga::from_prepared(
@@ -366,13 +318,14 @@ impl Wallet {
         let melt_requested = saga.request_melt().await?;
         let finalized = melt_requested.execute(metadata).await?;
 
-        Ok(ConfirmedMelt {
-            state: finalized.state(),
-            amount: finalized.amount(),
-            fee: finalized.fee(),
-            payment_preimage: finalized.payment_preimage().map(|s| s.to_string()),
-            change: finalized.into_change(),
-        })
+        Ok(FinalizedMelt::new(
+            finalized.quote_id().to_string(),
+            finalized.state(),
+            finalized.payment_preimage().map(|s| s.to_string()),
+            finalized.amount(),
+            finalized.fee(),
+            finalized.into_change(),
+        ))
     }
 
     /// Cancel a prepared melt and release reserved proofs.

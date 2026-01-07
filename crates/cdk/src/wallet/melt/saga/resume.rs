@@ -103,14 +103,14 @@ impl Wallet {
                     // Payment failed - compensate and return FinalizedMelt with failed state
                     tracing::info!("Melt saga {} - payment failed, compensating", saga_id);
                     self.compensate_melt(saga_id).await?;
-                    Ok(Some(FinalizedMelt {
-                        quote_id: data.quote_id.clone(),
-                        state: quote_status.state,
-                        preimage: None,
-                        change: None,
-                        amount: data.amount,
-                        fee_paid: Amount::ZERO,
-                    }))
+                    Ok(Some(FinalizedMelt::new(
+                        data.quote_id.clone(),
+                        quote_status.state,
+                        None,
+                        data.amount,
+                        Amount::ZERO,
+                        None,
+                    )))
                 }
                 MeltQuoteState::Pending | MeltQuoteState::Unknown => {
                     // Still pending or unknown - skip and retry later
@@ -215,14 +215,14 @@ impl Wallet {
         // Delete the saga record
         self.localstore.delete_saga(saga_id).await?;
 
-        Ok(FinalizedMelt {
-            quote_id: data.quote_id.clone(),
-            state: MeltQuoteState::Paid,
-            preimage: quote_status.payment_preimage.clone(),
-            change: change_proofs,
-            amount: data.amount,
+        Ok(FinalizedMelt::new(
+            data.quote_id.clone(),
+            MeltQuoteState::Paid,
+            quote_status.payment_preimage.clone(),
+            data.amount,
             fee_paid,
-        })
+            change_proofs,
+        ))
     }
 
     /// Compensate a melt saga by releasing proofs and the melt quote.

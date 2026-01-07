@@ -878,7 +878,7 @@ async fn test_melt_with_fees_swap_before_melt() {
     let melted = prepared.confirm().await.unwrap();
 
     let melt_amount: u64 = melted.amount().into();
-    let ln_fee_paid: u64 = melted.fee().into();
+    let ln_fee_paid: u64 = melted.fee_paid().into();
 
     tracing::info!(
         "Melt completed: amount={}, ln_fee_paid={}",
@@ -1004,7 +1004,7 @@ async fn test_melt_exact_match_no_swap() {
     let melted = prepared.confirm().await.unwrap();
 
     let melt_amount: u64 = melted.amount().into();
-    let ln_fee_paid: u64 = melted.fee().into();
+    let ln_fee_paid: u64 = melted.fee_paid().into();
 
     tracing::info!(
         "Melt completed: amount={}, ln_fee_paid={}",
@@ -1121,7 +1121,7 @@ async fn test_melt_small_amount_tight_margin() {
     tracing::info!(
         "Melt completed: amount={}, fee_paid={}, final_balance={}",
         melted.amount(),
-        melted.fee(),
+        melted.fee_paid(),
         final_balance
     );
 
@@ -1228,7 +1228,7 @@ async fn test_melt_swap_tight_margin_regression() {
     tracing::info!(
         "Melt completed: amount={}, fee_paid={}, final_balance={}",
         melted.amount(),
-        melted.fee(),
+        melted.fee_paid(),
         final_balance
     );
 
