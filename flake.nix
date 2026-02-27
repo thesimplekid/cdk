@@ -610,6 +610,7 @@
             cargo-outdated
             cargo-mutants
             cargo-fuzz
+            cargo-nextest
 
             # Database
             postgresql_16
@@ -807,6 +808,44 @@
             }
           );
 
+        # ========================================
+        # Integration test harness binaries (pre-built via Crane, cached by Cachix)
+        # These are used by CI integration test scripts instead of cargo build/run
+        # ========================================
+        mkItestBinary = name: cargoExtraArgs: craneLib.buildPackage (commonCraneArgs // {
+          pname = "cdk-itest-${name}";
+          cargoArtifacts = workspaceDeps;
+          inherit cargoExtraArgs;
+          # Only install the specific binary, not the entire workspace
+          doCheck = false;
+        });
+
+        itestBinaries = {
+          start-fake-mint = mkItestBinary "start-fake-mint" "--bin start_fake_mint";
+          start-regtest-mints = mkItestBinary "start-regtest-mints" "--bin start_regtest_mints";
+          start-fake-auth-mint = mkItestBinary "start-fake-auth-mint" "--bin start_fake_auth_mint";
+          start-regtest = mkItestBinary "start-regtest" "--bin start_regtest";
+          signatory = mkItestBinary "signatory" "--bin signatory";
+          cdk-payment-processor = mkItestBinary "cdk-payment-processor" "--bin cdk-payment-processor";
+          cdk-mintd-grpc = mkItestBinary "cdk-mintd-grpc" "--bin cdk-mintd --no-default-features --features grpc-processor";
+        };
+
+        # Nextest archive for integration tests (pre-compiled test binaries)
+        itestArchive = craneLib.mkCargoDerivation (commonCraneArgs // {
+          pname = "cdk-itest-archive";
+          cargoArtifacts = workspaceDeps;
+          nativeBuildInputs = commonCraneArgs.nativeBuildInputs ++ [
+            pkgs.cargo-nextest
+          ];
+          buildPhaseCargoCommand = ''
+            mkdir -p $out
+            cargo nextest archive \
+              -p cdk-integration-tests \
+              --archive-file $out/itest-archive.tar.zst
+          '';
+          installPhaseCommand = "";
+        });
+
         # Common arguments can be set here to avoid repeating them later
         nativeBuildInputs = [
           #Add additional build inputs here
@@ -864,6 +903,11 @@
             name = "cdk-cli";
             cargoExtraArgs = "--bin cdk-cli";
           };
+        }
+        # Integration test harness binaries (pre-built for CI)
+        // itestBinaries
+        // {
+          itest-archive = itestArchive;
         }
         # Example packages (binaries that can be run outside sandbox with network access)
         // (builtins.listToAttrs (
@@ -977,7 +1021,8 @@
                   ++ regtestBuildInputs
                   ++ [
                     stable_toolchain
-                  ];
+                  ]
+                  ++ builtins.attrValues itestBinaries;
                 inherit nativeBuildInputs;
               }
               // envVars
@@ -1030,7 +1075,8 @@
                     stable_toolchain
                     pkgs.docker-client
                     pkgs.python311
-                  ];
+                  ]
+                  ++ builtins.attrValues itestBinaries;
                 inherit nativeBuildInputs;
               }
               // envVars
