@@ -292,7 +292,9 @@ pub async fn start_regtest_end(
     bitcoin_client.load_wallet()?;
 
     let new_add = bitcoin_client.get_new_address()?;
-    bitcoin_client.generate_blocks(&new_add, 200).unwrap();
+    for _ in 0..4 {
+        bitcoin_client.generate_blocks(&new_add, 50).unwrap();
+    }
 
     let cln_one_dir = get_cln_dir(work_dir, "one");
     let mut clnd = Clnd::new(
@@ -304,7 +306,19 @@ pub async fn start_regtest_end(
     );
     clnd.start_clnd()?;
 
-    let cln_client = ClnClient::new(cln_one_dir.clone(), None).await?;
+    let mut cln_client = None;
+    for _ in 0..60 {
+        match ClnClient::new(cln_one_dir.clone(), None).await {
+            Ok(c) => {
+                cln_client = Some(c);
+                break;
+            }
+            Err(_) => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+    let cln_client = cln_client.expect("Failed to connect to CLN 1");
 
     wait_for_ln_ready(&cln_client).await?;
 
@@ -321,7 +335,19 @@ pub async fn start_regtest_end(
     );
     clnd_two.start_clnd()?;
 
-    let cln_two_client = ClnClient::new(cln_two_dir.clone(), None).await?;
+    let mut cln_two_client = None;
+    for _ in 0..60 {
+        match ClnClient::new(cln_two_dir.clone(), None).await {
+            Ok(c) => {
+                cln_two_client = Some(c);
+                break;
+            }
+            Err(_) => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+    let cln_two_client = cln_two_client.expect("Failed to connect to CLN 2");
 
     wait_for_ln_ready(&cln_two_client).await?;
 
