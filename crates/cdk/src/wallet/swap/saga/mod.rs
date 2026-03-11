@@ -109,6 +109,7 @@ impl<'a> SwapSaga<'a, Initial> {
         let pre_swap = self
             .wallet
             .create_swap(
+                &self.state_data.operation_id,
                 active_keyset_id,
                 &fee_and_amounts,
                 amount,
@@ -352,5 +353,62 @@ impl<S: std::fmt::Debug> std::fmt::Debug for SwapSaga<'_, S> {
         f.debug_struct("SwapSaga")
             .field("state_data", &self.state_data)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use cdk_common::nuts::State;
+
+    use super::SwapSaga;
+    use crate::amount::SplitTarget;
+    use crate::wallet::test_utils::{
+        create_test_db, create_test_wallet_with_mock, test_keyset_id, test_mint_url,
+        test_proof_info, MockMintConnector,
+    };
+
+    #[tokio::test]
+    async fn test_prepare_swap_reserves_proofs_for_operation() {
+        let db = create_test_db().await;
+        let mint_url = test_mint_url();
+        let keyset_id = test_keyset_id();
+        let proof_info = test_proof_info(keyset_id, 100, mint_url);
+        let proof_y = proof_info.y;
+        db.update_proofs(vec![proof_info], vec![]).await.unwrap();
+
+        let mock_client = Arc::new(MockMintConnector::new());
+        mock_client.reset_default_mint_state();
+        let wallet = create_test_wallet_with_mock(db.clone(), mock_client).await;
+
+        let saga = SwapSaga::new(&wallet);
+        let prepared = saga
+            .prepare(
+                None,
+                SplitTarget::default(),
+                wallet.get_unspent_proofs().await.unwrap(),
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+
+        let reserved = db
+            .get_reserved_proofs(&prepared.state_data.operation_id)
+            .await
+            .unwrap();
+        assert_eq!(reserved.len(), 1);
+        assert_eq!(reserved[0].y, proof_y);
+        assert_eq!(reserved[0].state, State::Reserved);
+
+        let stored = db.get_proofs_by_ys(vec![proof_y]).await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].state, State::Reserved);
+        assert_eq!(
+            stored[0].used_by_operation,
+            Some(prepared.state_data.operation_id)
+        );
     }
 }
