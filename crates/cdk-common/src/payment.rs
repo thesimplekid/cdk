@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::mint::{MeltPaymentRequest, MeltQuote};
 use crate::nuts::{CurrencyUnit, MeltQuoteState};
-use crate::Amount;
+use crate::{Amount, QuoteId};
 
 /// CDK Lightning Error
 #[derive(Debug, Error)]
@@ -100,6 +100,8 @@ pub enum PaymentIdentifier {
     PaymentId([u8; 32]),
     /// Custom Payment ID
     CustomId(String),
+    /// Quote ID
+    QuoteId(QuoteId),
 }
 
 impl PaymentIdentifier {
@@ -124,6 +126,11 @@ impl PaymentIdentifier {
                     .try_into()
                     .map_err(|_| Error::InvalidHash)?,
             )),
+            "quote_id" => {
+                Ok(Self::QuoteId(identifier.parse().map_err(|_| {
+                    Error::Custom("Invalid QuoteId".to_string())
+                })?))
+            }
             _ => Err(Error::UnsupportedPaymentOption),
         }
     }
@@ -137,6 +144,7 @@ impl PaymentIdentifier {
             Self::Bolt12PaymentHash(_) => "bolt12_payment_hash".to_string(),
             Self::PaymentId(_) => "payment_id".to_string(),
             Self::CustomId(_) => "custom".to_string(),
+            Self::QuoteId(_) => "quote_id".to_string(),
         }
     }
 }
@@ -150,6 +158,7 @@ impl std::fmt::Display for PaymentIdentifier {
             Self::Bolt12PaymentHash(h) => write!(f, "{}", hex::encode(h)),
             Self::PaymentId(h) => write!(f, "{}", hex::encode(h)),
             Self::CustomId(c) => write!(f, "{c}"),
+            Self::QuoteId(q) => write!(f, "{q}"),
         }
     }
 }
@@ -165,6 +174,7 @@ impl std::fmt::Debug for PaymentIdentifier {
             PaymentIdentifier::Label(s) => write!(f, "Label({})", s),
             PaymentIdentifier::OfferId(s) => write!(f, "OfferId({})", s),
             PaymentIdentifier::CustomId(s) => write!(f, "CustomId({})", s),
+            PaymentIdentifier::QuoteId(q) => write!(f, "QuoteId({:?})", q),
         }
     }
 }
@@ -753,3 +763,41 @@ where
 
 /// Type alias for Mint Payment trait
 pub type DynMintPayment = std::sync::Arc<dyn MintPayment<Err = Error> + Send + Sync>;
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+    use crate::QuoteId;
+
+    #[test]
+    fn test_payment_identifier_quote_id_roundtrip() {
+        let quote_id = QuoteId::new_uuid();
+        let identifier = PaymentIdentifier::QuoteId(quote_id.clone());
+
+        let kind = identifier.kind();
+        assert_eq!(kind, "quote_id");
+
+        let display = identifier.to_string();
+        assert_eq!(display, quote_id.to_string());
+
+        let parsed = PaymentIdentifier::new(&kind, &display).unwrap();
+        assert_eq!(parsed, identifier);
+    }
+
+    #[test]
+    fn test_payment_identifier_quote_id_base64_roundtrip() {
+        let quote_id_str = "SGVsbG8gV29ybGQh"; // Valid Base64
+        let identifier = PaymentIdentifier::QuoteId(QuoteId::from_str(quote_id_str).unwrap());
+
+        let kind = identifier.kind();
+        assert_eq!(kind, "quote_id");
+
+        let display = identifier.to_string();
+        assert_eq!(display, quote_id_str);
+
+        let parsed = PaymentIdentifier::new(&kind, &display).unwrap();
+        assert_eq!(parsed, identifier);
+    }
+}
