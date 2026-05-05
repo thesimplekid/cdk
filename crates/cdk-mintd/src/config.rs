@@ -289,6 +289,13 @@ pub struct Bdk {
     pub chain_source_type: Option<String>,
     /// Esplora URL (when chain_source_type = "esplora")
     pub esplora_url: Option<String>,
+    /// Number of parallel Esplora requests during wallet sync.
+    ///
+    /// Public Esplora servers often rate-limit bursty clients, so the default
+    /// is conservative. Increase only when using a private or higher-limit
+    /// Esplora server.
+    #[serde(default = "default_bdk_esplora_parallel_requests")]
+    pub esplora_parallel_requests: usize,
     /// Bitcoin RPC host (when chain_source_type = "bitcoinrpc")
     pub bitcoind_rpc_host: Option<String>,
     /// Bitcoin RPC port
@@ -327,6 +334,7 @@ impl Default for Bdk {
             network: None,
             chain_source_type: None,
             esplora_url: None,
+            esplora_parallel_requests: default_bdk_esplora_parallel_requests(),
             bitcoind_rpc_host: None,
             bitcoind_rpc_port: None,
             bitcoind_rpc_user: None,
@@ -353,6 +361,11 @@ fn default_bdk_min_receive_amount_sat() -> u64 {
 #[cfg(feature = "bdk")]
 fn default_bdk_sync_interval_secs() -> u64 {
     30
+}
+
+#[cfg(feature = "bdk")]
+fn default_bdk_esplora_parallel_requests() -> usize {
+    1
 }
 
 #[cfg(feature = "bdk")]

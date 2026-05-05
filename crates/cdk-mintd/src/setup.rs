@@ -488,7 +488,7 @@ impl OnchainBackendSetup for crate::config::Bdk {
                     .unwrap_or_else(|| "https://mutinynet.com/api".to_string());
                 cdk_bdk::ChainSource::Esplora(cdk_bdk::EsploraConfig {
                     url: esplora_url,
-                    parallel_requests: 5,
+                    parallel_requests: self.esplora_parallel_requests.max(1),
                 })
             }
             _ => {

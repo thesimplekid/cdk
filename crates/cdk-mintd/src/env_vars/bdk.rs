@@ -12,6 +12,7 @@ pub const BDK_BITCOIND_RPC_USER_ENV_VAR: &str = "CDK_MINTD_BDK_BITCOIND_RPC_USER
 pub const BDK_BITCOIND_RPC_PASSWORD_ENV_VAR: &str = "CDK_MINTD_BDK_BITCOIND_RPC_PASSWORD";
 pub const BDK_CHAIN_SOURCE_TYPE_ENV_VAR: &str = "CDK_MINTD_BDK_CHAIN_SOURCE_TYPE";
 pub const BDK_ESPLORA_URL_ENV_VAR: &str = "CDK_MINTD_BDK_ESPLORA_URL";
+pub const BDK_ESPLORA_PARALLEL_REQUESTS_ENV_VAR: &str = "CDK_MINTD_BDK_ESPLORA_PARALLEL_REQUESTS";
 pub const BDK_NUM_CONFS_ENV_VAR: &str = "CDK_MINTD_BDK_NUM_CONFS";
 pub const BDK_FEE_PERCENT_ENV_VAR: &str = "CDK_MINTD_BDK_FEE_PERCENT";
 pub const BDK_RESERVE_FEE_MIN_ENV_VAR: &str = "CDK_MINTD_BDK_RESERVE_FEE_MIN";
@@ -59,6 +60,12 @@ impl Bdk {
 
         if let Ok(esplora_url) = env::var(BDK_ESPLORA_URL_ENV_VAR) {
             self.esplora_url = Some(esplora_url);
+        }
+
+        if let Ok(esplora_parallel_requests) = env::var(BDK_ESPLORA_PARALLEL_REQUESTS_ENV_VAR) {
+            if let Ok(esplora_parallel_requests) = esplora_parallel_requests.parse::<usize>() {
+                self.esplora_parallel_requests = esplora_parallel_requests;
+            }
         }
 
         if let Ok(num_confs) = env::var(BDK_NUM_CONFS_ENV_VAR) {
