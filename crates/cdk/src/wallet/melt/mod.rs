@@ -343,7 +343,16 @@ impl MeltQuoteStatusResponse {
             Self::Onchain(r) => Ok(cdk_common::MeltQuoteBolt11Response {
                 quote: r.quote,
                 amount: r.amount,
-                fee_reserve: r.fee,
+                fee_reserve: r
+                    .selected_estimated_blocks
+                    .and_then(|selected| {
+                        r.fee_options
+                            .iter()
+                            .find(|option| option.estimated_blocks == selected)
+                    })
+                    .or_else(|| r.fee_options.first())
+                    .map(|option| option.fee)
+                    .unwrap_or(Amount::ZERO),
                 state: r.state,
                 expiry: r.expiry,
                 // Onchain uses `outpoint` as payment proof; surface it here
@@ -1359,7 +1368,12 @@ impl Wallet {
                     response.outpoint.clone(),
                 )
                 .await?;
-                quote.estimated_blocks = Some(response.estimated_blocks);
+                quote.estimated_blocks = response.selected_estimated_blocks.or_else(|| {
+                    response
+                        .fee_options
+                        .first()
+                        .map(|option| option.estimated_blocks)
+                });
                 self.localstore.add_melt_quote(quote.clone()).await?;
             }
         };

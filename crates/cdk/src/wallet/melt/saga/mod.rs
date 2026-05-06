@@ -40,14 +40,14 @@ use cdk_common::wallet::{
     MeltOperationData, MeltQuote, MeltSagaState, OperationData, ProofInfo, Transaction,
     TransactionDirection, WalletSaga, WalletSagaState,
 };
-use cdk_common::MeltQuoteState;
+use cdk_common::{MeltQuoteState, PaymentMethod};
 use tracing::instrument;
 use uuid::Uuid;
 
 use self::compensation::{ReleaseMeltQuote, RevertProofReservation};
 use self::state::{Finalized, Initial, MeltRequested, PaymentPending, Prepared};
 use super::MeltConfirmOptions;
-use crate::nuts::nut00::ProofsMethods;
+use crate::nuts::nut00::{KnownMethod, ProofsMethods};
 use crate::nuts::{MeltRequest, PreMintSecrets, Proofs, State};
 use crate::util::unix_time;
 use crate::wallet::keysets::KeysetFilter;
@@ -764,7 +764,9 @@ impl<'a> MeltSaga<'a, Prepared> {
             .await?;
         let counter_start = counter_end.saturating_sub(premint_secrets.secrets.len() as u32);
 
-        let change_blinded_messages = if change_amount > Amount::ZERO {
+        let is_onchain = quote_info.payment_method == PaymentMethod::Known(KnownMethod::Onchain);
+
+        let change_blinded_messages = if !is_onchain && change_amount > Amount::ZERO {
             Some(premint_secrets.blinded_messages())
         } else {
             None
@@ -877,9 +879,23 @@ impl<'a> MeltSaga<'a, MeltRequested> {
         let request = MeltRequest::new(
             quote_info.id.clone(),
             self.state_data.final_proofs.clone(),
-            Some(self.state_data.premint_secrets.blinded_messages()),
+            if quote_info.payment_method == PaymentMethod::Known(KnownMethod::Onchain) {
+                None
+            } else {
+                Some(self.state_data.premint_secrets.blinded_messages())
+            },
         )
         .prefer_async(true);
+
+        let request = if quote_info.payment_method == PaymentMethod::Known(KnownMethod::Onchain) {
+            request.estimated_blocks(
+                quote_info
+                    .estimated_blocks
+                    .ok_or(Error::InvalidPaymentRequest)?,
+            )
+        } else {
+            request
+        };
 
         let melt_result = self
             .wallet

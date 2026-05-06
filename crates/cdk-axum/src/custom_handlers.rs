@@ -88,7 +88,7 @@ fn melt_quote_create_response_to_json(response: MeltQuoteCreateResponse<QuoteId>
     match response {
         MeltQuoteCreateResponse::Bolt11(r) => Json(r).into_response(),
         MeltQuoteCreateResponse::Bolt12(r) => Json(r).into_response(),
-        MeltQuoteCreateResponse::Onchain(r) => Json(r.quotes).into_response(),
+        MeltQuoteCreateResponse::Onchain(r) => Json(r).into_response(),
         MeltQuoteCreateResponse::Custom((_, r)) => Json(r).into_response(),
     }
 }
@@ -451,7 +451,7 @@ pub async fn post_melt_custom_quote(
                 .map_err(into_response)?;
 
             return match response {
-                MeltQuoteCreateResponse::Onchain(r) => Ok(Json(r.quotes).into_response()),
+                MeltQuoteCreateResponse::Onchain(r) => Ok(Json(r).into_response()),
                 _ => Err(into_response(cdk::Error::InvalidPaymentMethod)),
             };
         }

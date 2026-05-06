@@ -5,6 +5,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use bitcoin::bip32::DerivationPath;
+use cashu::nuts::nut_onchain::MeltQuoteOnchainFeeOption;
 use cashu::quote_id::QuoteId;
 use cashu::util::unix_time;
 use cashu::{
@@ -868,6 +869,10 @@ pub struct MeltQuote {
     pub extra_json: Option<serde_json::Value>,
     /// Estimated confirmation target in blocks for onchain quotes
     pub estimated_blocks: Option<u32>,
+    /// Onchain fee options fixed for the lifetime of the quote
+    pub fee_options: Vec<MeltQuoteOnchainFeeOption>,
+    /// Selected confirmation target once an onchain quote is executed
+    pub selected_estimated_blocks: Option<u32>,
 }
 
 impl MeltQuote {
@@ -888,6 +893,15 @@ impl MeltQuote {
     ) -> Self {
         let id = id.unwrap_or_else(QuoteId::new_uuid);
 
+        let fee_options = estimated_blocks
+            .map(|estimated_blocks| {
+                vec![MeltQuoteOnchainFeeOption {
+                    fee: fee_reserve.clone().into(),
+                    estimated_blocks,
+                }]
+            })
+            .unwrap_or_default();
+
         Self {
             id,
             unit: unit.clone(),
@@ -904,6 +918,8 @@ impl MeltQuote {
             payment_method,
             extra_json,
             estimated_blocks,
+            fee_options,
+            selected_estimated_blocks: None,
         }
     }
 
@@ -917,6 +933,29 @@ impl MeltQuote {
     #[inline]
     pub fn fee_reserve(&self) -> Amount<CurrencyUnit> {
         self.fee_reserve.clone()
+    }
+
+    /// Select an onchain fee option by confirmation target.
+    pub fn select_onchain_fee_option(&mut self, estimated_blocks: u32) -> Result<(), crate::Error> {
+        let fee = self
+            .fee_options
+            .iter()
+            .find(|option| option.estimated_blocks == estimated_blocks)
+            .map(|option| option.fee.with_unit(self.unit.clone()))
+            .ok_or(crate::Error::InvalidPaymentRequest)?;
+
+        if self
+            .selected_estimated_blocks
+            .is_some_and(|selected| selected != estimated_blocks)
+        {
+            return Err(crate::Error::InvalidPaymentRequest);
+        }
+
+        self.fee_reserve = fee;
+        self.estimated_blocks = Some(estimated_blocks);
+        self.selected_estimated_blocks = Some(estimated_blocks);
+
+        Ok(())
     }
 
     /// Convert into `MeltQuoteResponse`, overriding `change` on the inner
@@ -984,7 +1023,22 @@ impl MeltQuote {
         payment_method: PaymentMethod,
         extra_json: Option<serde_json::Value>,
         estimated_blocks: Option<u32>,
+        fee_options: Vec<MeltQuoteOnchainFeeOption>,
+        selected_estimated_blocks: Option<u32>,
     ) -> Self {
+        let fee_options = if fee_options.is_empty() {
+            estimated_blocks
+                .map(|estimated_blocks| {
+                    vec![MeltQuoteOnchainFeeOption {
+                        fee: Amount::from(fee_reserve),
+                        estimated_blocks,
+                    }]
+                })
+                .unwrap_or_default()
+        } else {
+            fee_options
+        };
+
         Self {
             id,
             unit: unit.clone(),
@@ -1001,6 +1055,8 @@ impl MeltQuote {
             payment_method,
             extra_json,
             estimated_blocks,
+            fee_options,
+            selected_estimated_blocks,
         }
     }
 }
@@ -1012,8 +1068,8 @@ impl From<MeltQuote> for MeltQuoteOnchainResponse<QuoteId> {
             request: quote.request.to_string(),
             amount: quote.amount().into(),
             unit: quote.unit.clone(),
-            fee: quote.fee_reserve().into(),
-            estimated_blocks: quote.estimated_blocks.unwrap_or_default(),
+            fee_options: quote.fee_options.clone(),
+            selected_estimated_blocks: quote.selected_estimated_blocks,
             state: quote.state,
             expiry: quote.expiry,
             outpoint: quote.payment_proof.clone(),
@@ -1492,7 +1548,7 @@ mod tests {
 
         let expected_id = melt_quote.id.clone();
         let expected_amount: Amount = melt_quote.amount().into();
-        let expected_fee: Amount = melt_quote.fee_reserve().into();
+        let expected_fee_options = melt_quote.fee_options.clone();
         let expected_expiry = melt_quote.expiry;
         let expected_state = melt_quote.state;
         let expected_outpoint = melt_quote.payment_proof.clone();
@@ -1506,8 +1562,8 @@ mod tests {
                 assert_eq!(r.request, address);
                 assert_eq!(r.amount, expected_amount);
                 assert_eq!(r.unit, CurrencyUnit::Sat);
-                assert_eq!(r.fee, expected_fee);
-                assert_eq!(r.estimated_blocks, 6);
+                assert_eq!(r.fee_options, expected_fee_options);
+                assert_eq!(r.selected_estimated_blocks, None);
                 assert_eq!(r.state, expected_state);
                 assert_eq!(r.expiry, expected_expiry);
                 assert_eq!(r.outpoint, expected_outpoint);

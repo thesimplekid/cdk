@@ -18,8 +18,7 @@ use cdk_common::quote_id::QuoteId;
 use cdk_common::subscription::Params;
 use cdk_common::{
     MeltOptions, MeltQuoteBolt12Request, MeltQuoteCreateResponse, MeltQuoteCustomRequest,
-    MeltQuoteCustomResponse, MeltQuoteOnchainOptions, MeltQuoteOnchainRequest,
-    MeltQuoteOnchainResponse, MeltQuoteResponse,
+    MeltQuoteCustomResponse, MeltQuoteOnchainRequest, MeltQuoteOnchainResponse, MeltQuoteResponse,
 };
 #[cfg(feature = "prometheus")]
 use cdk_prometheus::METRICS;
@@ -291,11 +290,9 @@ impl Mint {
             MeltQuoteRequest::Bolt12(bolt12_request) => Ok(MeltQuoteCreateResponse::Bolt12(
                 self.get_melt_bolt12_quote_impl(&bolt12_request).await?,
             )),
-            MeltQuoteRequest::Onchain(onchain_request) => {
-                Ok(MeltQuoteCreateResponse::Onchain(MeltQuoteOnchainOptions {
-                    quotes: self.get_melt_onchain_quote_impl(&onchain_request).await?,
-                }))
-            }
+            MeltQuoteRequest::Onchain(onchain_request) => Ok(MeltQuoteCreateResponse::Onchain(
+                self.get_melt_onchain_quote_impl(&onchain_request).await?,
+            )),
             MeltQuoteRequest::Custom(request) => {
                 let quote = self.get_melt_custom_quote_impl(&request).await?;
                 let method = PaymentMethod::from(request.method.as_str());
@@ -523,7 +520,7 @@ impl Mint {
     async fn get_melt_onchain_quote_impl(
         &self,
         melt_request: &MeltQuoteOnchainRequest,
-    ) -> Result<Vec<MeltQuoteOnchainResponse<QuoteId>>, Error> {
+    ) -> Result<MeltQuoteOnchainResponse<QuoteId>, Error> {
         #[cfg(feature = "prometheus")]
         METRICS.inc_in_flight_requests("get_melt_onchain_quote");
 
@@ -642,7 +639,7 @@ impl Mint {
             METRICS.record_mint_operation("get_melt_onchain_quote", true);
         }
 
-        Ok(vec![quote.into()])
+        Ok(quote.into())
     }
 
     /// Implementation of get_melt_custom_quote

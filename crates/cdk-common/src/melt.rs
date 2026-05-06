@@ -10,30 +10,6 @@ use crate::nuts::nut25::{MeltQuoteBolt12Request, MeltQuoteBolt12Response};
 use crate::nuts::nut_onchain::{MeltQuoteOnchainRequest, MeltQuoteOnchainResponse};
 use crate::{Amount, CurrencyUnit, MeltQuoteState, PaymentMethod};
 
-/// Onchain melt quote creation response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(bound = "Q: Serialize + DeserializeOwned")]
-pub struct MeltQuoteOnchainOptions<Q> {
-    /// Available onchain quote options.
-    pub quotes: Vec<MeltQuoteOnchainResponse<Q>>,
-}
-
-impl<Q: ToString> MeltQuoteOnchainOptions<Q> {
-    /// Convert the MeltQuoteOnchainOptions with a quote type Q to a String
-    pub fn to_string_id(&self) -> MeltQuoteOnchainOptions<String> {
-        MeltQuoteOnchainOptions {
-            quotes: self.quotes.iter().map(|q| q.to_string_id()).collect(),
-        }
-    }
-}
-
-#[cfg(feature = "mint")]
-impl From<MeltQuoteOnchainOptions<crate::QuoteId>> for MeltQuoteOnchainOptions<String> {
-    fn from(value: MeltQuoteOnchainOptions<crate::QuoteId>) -> Self {
-        value.to_string_id()
-    }
-}
-
 /// Melt quote request enum for different types of quotes
 ///
 /// This enum represents the different types of melt quote requests
@@ -108,8 +84,8 @@ pub enum MeltQuoteCreateResponse<Q> {
     Bolt11(MeltQuoteBolt11Response<Q>),
     /// Bolt12 (Offers)
     Bolt12(MeltQuoteBolt12Response<Q>),
-    /// Onchain quote options
-    Onchain(MeltQuoteOnchainOptions<Q>),
+    /// Onchain
+    Onchain(MeltQuoteOnchainResponse<Q>),
     /// Custom payment method
     Custom((PaymentMethod, MeltQuoteCustomResponse<Q>)),
 }
@@ -162,7 +138,16 @@ impl<Q: ToString> MeltQuoteResponse<Q> {
         match self {
             Self::Bolt11(r) => r.fee_reserve,
             Self::Bolt12(r) => r.fee_reserve,
-            Self::Onchain(r) => r.fee,
+            Self::Onchain(r) => r
+                .selected_estimated_blocks
+                .and_then(|selected| {
+                    r.fee_options
+                        .iter()
+                        .find(|option| option.estimated_blocks == selected)
+                })
+                .or_else(|| r.fee_options.first())
+                .map(|option| option.fee)
+                .unwrap_or(Amount::ZERO),
             Self::Custom((_, r)) => r.fee_reserve,
         }
     }
@@ -273,7 +258,7 @@ impl<Q: ToString> MeltQuoteCreateResponse<Q> {
         match self {
             Self::Bolt11(r) => Some(&r.quote),
             Self::Bolt12(r) => Some(&r.quote),
-            Self::Onchain(_) => None,
+            Self::Onchain(r) => Some(&r.quote),
             Self::Custom((_, r)) => Some(&r.quote),
         }
     }
@@ -325,8 +310,8 @@ where
                     request: value.request.to_string(),
                     amount: value.amount().into(),
                     unit: value.unit.clone(),
-                    fee: value.fee_reserve().into(),
-                    estimated_blocks: value.estimated_blocks.unwrap_or_default(),
+                    fee_options: value.fee_options.clone(),
+                    selected_estimated_blocks: value.selected_estimated_blocks,
                     state: value.state,
                     expiry: value.expiry,
                     outpoint: value.payment_proof.clone(),
@@ -356,7 +341,7 @@ mod tests {
     use super::*;
     use crate::nuts::nut05::MeltQuoteCustomResponse;
     use crate::nuts::nut23::MeltQuoteBolt11Response;
-    use crate::nuts::nut_onchain::MeltQuoteOnchainResponse;
+    use crate::nuts::nut_onchain::{MeltQuoteOnchainFeeOption, MeltQuoteOnchainResponse};
     use crate::{Amount, CurrencyUnit, MeltQuoteState};
 
     fn bolt11_response(quote: &str) -> MeltQuoteBolt11Response<String> {
@@ -393,8 +378,11 @@ mod tests {
             request: "bc1qonchainaddress".to_string(),
             amount: Amount::from(400),
             unit: CurrencyUnit::Sat,
-            fee: Amount::from(4),
-            estimated_blocks: 6,
+            fee_options: vec![MeltQuoteOnchainFeeOption {
+                fee: Amount::from(4),
+                estimated_blocks: 6,
+            }],
+            selected_estimated_blocks: Some(6),
             state: MeltQuoteState::Paid,
             expiry: 4000,
             outpoint: Some("abcd...ef:0".to_string()),

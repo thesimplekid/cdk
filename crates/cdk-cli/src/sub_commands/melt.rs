@@ -136,7 +136,9 @@ fn parse_mpp_split(entry: &str) -> Result<(MintUrl, Amount)> {
     Ok((mint_url, Amount::from(amount_sat)))
 }
 
-fn select_onchain_quote(quotes: &[cdk_common::wallet::MeltQuote]) -> Result<cdk_common::wallet::MeltQuote> {
+fn select_onchain_quote(
+    quotes: &[cdk_common::wallet::MeltQuote],
+) -> Result<cdk_common::wallet::MeltQuote> {
     if quotes.is_empty() {
         bail!("No onchain melt quotes available");
     }
@@ -458,7 +460,9 @@ pub async fn pay(
                     .into_iter()
                     .find(|(_, balance)| *balance >= melt_amount)
                     .map(|(key, _)| key.mint_url)
-                    .ok_or_else(|| anyhow::anyhow!("No mint with sufficient balance for onchain melt"))?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("No mint with sufficient balance for onchain melt")
+                    })?
             };
 
             let wallet = get_or_create_wallet(wallet_repository, &mint_url, unit).await?;

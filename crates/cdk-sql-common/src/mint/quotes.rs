@@ -11,6 +11,7 @@ use cdk_common::database::{
 use cdk_common::mint::{
     self, IncomingPayment, Issuance, MeltPaymentRequest, MeltQuote, MintQuote, Operation,
 };
+use cdk_common::nuts::nut_onchain::MeltQuoteOnchainFeeOption;
 use cdk_common::payment::PaymentIdentifier;
 use cdk_common::quote_id::QuoteId;
 use cdk_common::state::check_melt_quote_state_transition;
@@ -281,7 +282,9 @@ where
             payment_method,
             options,
             request_lookup_id_kind,
-            extra_json
+            extra_json,
+            fee_options,
+            selected_estimated_blocks
         FROM
             melt_quote
         WHERE
@@ -390,7 +393,9 @@ where
             payment_method,
             options,
             request_lookup_id_kind,
-            extra_json
+            extra_json,
+            fee_options,
+            selected_estimated_blocks
         FROM
             melt_quote
         WHERE
@@ -445,7 +450,9 @@ where
             payment_method,
             options,
             request_lookup_id_kind,
-            extra_json
+            extra_json,
+            fee_options,
+            selected_estimated_blocks
         FROM
             melt_quote
         WHERE
@@ -553,7 +560,9 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
                 payment_method,
                 options,
                 request_lookup_id_kind,
-                extra_json
+                extra_json,
+                fee_options,
+                selected_estimated_blocks
         ) = row
     );
 
@@ -570,6 +579,11 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
     let payment_method = PaymentMethod::from_str(&column_as_string!(payment_method))?;
     let extra_json = column_as_nullable_string!(&extra_json)
         .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok());
+    let fee_options = column_as_nullable_string!(&fee_options)
+        .and_then(|value| serde_json::from_str::<Vec<MeltQuoteOnchainFeeOption>>(&value).ok())
+        .unwrap_or_default();
+    let selected_estimated_blocks: Option<u32> =
+        column_as_nullable_number!(selected_estimated_blocks);
 
     let state =
         MeltQuoteState::from_str(&column_as_string!(&state)).map_err(ConversionError::from)?;
@@ -627,6 +641,8 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
         payment_method,
         extra_json,
         estimated_blocks,
+        fee_options,
+        selected_estimated_blocks,
     ))
 }
 
@@ -938,14 +954,16 @@ where
             INSERT INTO melt_quote
             (
                 id, unit, amount, request, fee_reserve, state,
-                expiry, payment_proof, estimated_blocks, request_lookup_id,
-                created_time, paid_time, options, request_lookup_id_kind, payment_method, extra_json
+                expiry, payment_proof, estimated_blocks, fee_options, selected_estimated_blocks,
+                request_lookup_id, created_time, paid_time, options, request_lookup_id_kind,
+                payment_method, extra_json
             )
             VALUES
             (
                 :id, :unit, :amount, :request, :fee_reserve, :state,
-                :expiry, :payment_proof, :estimated_blocks, :request_lookup_id,
-                :created_time, :paid_time, :options, :request_lookup_id_kind, :payment_method, :extra_json
+                :expiry, :payment_proof, :estimated_blocks, :fee_options, :selected_estimated_blocks,
+                :request_lookup_id, :created_time, :paid_time, :options, :request_lookup_id_kind,
+                :payment_method, :extra_json
             )
         "#,
         )?
@@ -958,6 +976,14 @@ where
         .bind("expiry", quote.expiry as i64)
         .bind("payment_proof", quote.payment_proof)
         .bind("estimated_blocks", quote.estimated_blocks.map(i64::from))
+        .bind(
+            "fee_options",
+            serde_json::to_string(&quote.fee_options).ok(),
+        )
+        .bind(
+            "selected_estimated_blocks",
+            quote.selected_estimated_blocks.map(i64::from),
+        )
         .bind(
             "request_lookup_id",
             quote.request_lookup_id.as_ref().map(|id| id.to_string()),
@@ -1012,16 +1038,20 @@ where
             let current_time = unix_time();
             quote.paid_time = Some(current_time);
             quote.payment_proof = payment_proof.clone();
-            query(r#"UPDATE melt_quote SET state = :state, paid_time = :paid_time, payment_proof = :payment_proof WHERE id = :id"#)?
+            query(r#"UPDATE melt_quote SET state = :state, paid_time = :paid_time, payment_proof = :payment_proof, estimated_blocks = :estimated_blocks, selected_estimated_blocks = :selected_estimated_blocks WHERE id = :id"#)?
                 .bind("state", state.to_string())
                 .bind("paid_time", current_time as i64)
                 .bind("payment_proof", payment_proof)
+                .bind("estimated_blocks", quote.estimated_blocks.map(i64::from))
+                .bind("selected_estimated_blocks", quote.selected_estimated_blocks.map(i64::from))
                 .bind("id", quote.id.to_string())
                 .execute(&self.inner)
                 .await
         } else {
-            query(r#"UPDATE melt_quote SET state = :state WHERE id = :id"#)?
+            query(r#"UPDATE melt_quote SET state = :state, estimated_blocks = :estimated_blocks, selected_estimated_blocks = :selected_estimated_blocks WHERE id = :id"#)?
                 .bind("state", state.to_string())
+                .bind("estimated_blocks", quote.estimated_blocks.map(i64::from))
+                .bind("selected_estimated_blocks", quote.selected_estimated_blocks.map(i64::from))
                 .bind("id", quote.id.to_string())
                 .execute(&self.inner)
                 .await
@@ -1255,7 +1285,9 @@ where
                 payment_method,
                 options,
                 request_lookup_id_kind,
-                extra_json
+                extra_json,
+                fee_options,
+                selected_estimated_blocks
             FROM
                 melt_quote
             "#,

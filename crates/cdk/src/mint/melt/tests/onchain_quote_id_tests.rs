@@ -202,8 +202,12 @@ async fn onchain_quote_uses_mint_generated_id_when_backend_echoes() {
         cdk_common::MeltQuoteCreateResponse::Onchain(o) => o,
         other => panic!("expected onchain quote response, got {:?}", other),
     };
-    assert_eq!(options.quotes.len(), 1, "expected single tier-less quote");
-    let quote_id = options.quotes[0].quote.clone();
+    assert_eq!(
+        options.fee_options.len(),
+        1,
+        "expected single tier-less fee option"
+    );
+    let quote_id = options.quote.clone();
 
     // The stored quote must be retrievable under that id, and its persisted
     // `request_lookup_id` must be the deterministic echo (so the saga's

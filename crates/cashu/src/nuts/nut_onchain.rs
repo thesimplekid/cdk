@@ -99,12 +99,21 @@ pub struct MeltQuoteOnchainRequest {
     pub amount: Amount,
 }
 
+/// Fee option for an onchain melt quote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
+pub struct MeltQuoteOnchainFeeOption {
+    /// Absolute onchain transaction fee for this option
+    pub fee: Amount,
+    /// Estimated number of blocks until confirmation
+    pub estimated_blocks: u32,
+}
+
 /// Melt quote onchain response
 ///
 /// Response containing the onchain melt quote details.
-/// The `POST /v1/melt/quote/onchain` endpoint returns an **array** of these responses,
-/// each with different `fee` amounts and `estimated_blocks`. The wallet chooses which
-/// quote to use for melting; the other quotes will expire.
+/// The `POST /v1/melt/quote/onchain` endpoint returns one quote with one or
+/// more `fee_options`. The wallet chooses one option when executing the quote.
 ///
 /// `deny_unknown_fields` is intentional: the `NotificationPayload` enum is
 /// `#[serde(untagged)]` and melt-quote responses for different methods share
@@ -124,10 +133,10 @@ pub struct MeltQuoteOnchainResponse<Q> {
     pub amount: Amount,
     /// Unit
     pub unit: CurrencyUnit,
-    /// Fee required for the transaction
-    pub fee: Amount,
-    /// Estimated number of blocks until confirmation
-    pub estimated_blocks: u32,
+    /// Fee options for the transaction
+    pub fee_options: Vec<MeltQuoteOnchainFeeOption>,
+    /// Selected confirmation target once the quote is executed
+    pub selected_estimated_blocks: Option<u32>,
     /// Quote state
     pub state: MeltQuoteState,
     /// Unix timestamp until the quote is valid
@@ -149,8 +158,8 @@ impl<Q: ToString> MeltQuoteOnchainResponse<Q> {
             request: self.request.clone(),
             amount: self.amount,
             unit: self.unit.clone(),
-            fee: self.fee,
-            estimated_blocks: self.estimated_blocks,
+            fee_options: self.fee_options.clone(),
+            selected_estimated_blocks: self.selected_estimated_blocks,
             state: self.state,
             expiry: self.expiry,
             outpoint: self.outpoint.clone(),
@@ -166,8 +175,8 @@ impl From<MeltQuoteOnchainResponse<QuoteId>> for MeltQuoteOnchainResponse<String
             request: value.request,
             amount: value.amount,
             unit: value.unit,
-            fee: value.fee,
-            estimated_blocks: value.estimated_blocks,
+            fee_options: value.fee_options,
+            selected_estimated_blocks: value.selected_estimated_blocks,
             state: value.state,
             expiry: value.expiry,
             outpoint: value.outpoint,
@@ -219,8 +228,11 @@ mod tests {
             request: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh".to_string(),
             amount: Amount::from(100000),
             unit: CurrencyUnit::Sat,
-            fee: Amount::from(5000),
-            estimated_blocks: 1,
+            fee_options: vec![MeltQuoteOnchainFeeOption {
+                fee: Amount::from(5000),
+                estimated_blocks: 1,
+            }],
+            selected_estimated_blocks: Some(1),
             state: MeltQuoteState::Pending,
             expiry: 1701704757,
             outpoint: Some(
@@ -235,7 +247,11 @@ mod tests {
         assert_eq!(response.quote, deserialized.quote);
         assert_eq!(response.request, deserialized.request);
         assert_eq!(response.amount, deserialized.amount);
-        assert_eq!(response.fee, deserialized.fee);
+        assert_eq!(response.fee_options, deserialized.fee_options);
+        assert_eq!(
+            response.selected_estimated_blocks,
+            deserialized.selected_estimated_blocks
+        );
         assert_eq!(response.state, deserialized.state);
         assert_eq!(response.outpoint, deserialized.outpoint);
     }
@@ -273,8 +289,11 @@ mod tests {
             request: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh".to_string(),
             amount: Amount::from(100000),
             unit: CurrencyUnit::Sat,
-            fee: Amount::from(5000),
-            estimated_blocks: 1,
+            fee_options: vec![MeltQuoteOnchainFeeOption {
+                fee: Amount::from(5000),
+                estimated_blocks: 1,
+            }],
+            selected_estimated_blocks: Some(1),
             state: MeltQuoteState::Pending,
             expiry: 1701704757,
             outpoint: Some(
