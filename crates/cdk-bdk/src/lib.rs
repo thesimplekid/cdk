@@ -20,6 +20,7 @@ use bdk_wallet::template::Bip84;
 use bdk_wallet::{KeychainKind, PersistedWallet, Wallet};
 use cdk_common::common::FeeReserve;
 use cdk_common::database::KVStore;
+use cdk_common::nuts::nut_onchain::MeltQuoteOnchainFeeOption;
 use cdk_common::payment::{
     CreateIncomingPaymentResponse, Event, IncomingPaymentOptions, MakePaymentResponse, MintPayment,
     OnchainSettings, OutgoingPaymentOptions, PaymentIdentifier, PaymentQuoteResponse,
@@ -438,6 +439,12 @@ impl MintPayment for CdkBdk {
 
         let fee_reserve_sat = self.fee_reserve_for_estimate(estimated_fee_sat);
 
+        let estimated_blocks = match tier {
+            PaymentTier::Immediate => 1,
+            PaymentTier::Standard => 6,
+            PaymentTier::Economy => 144,
+        };
+
         // Echo the mint-supplied `quote_id` verbatim per the
         // `OnchainOutgoingPaymentOptions.quote_id` contract. The mint
         // validates this echo; any deviation triggers
@@ -448,13 +455,11 @@ impl MintPayment for CdkBdk {
             fee: Amount::new(fee_reserve_sat, CurrencyUnit::Sat),
             state: MeltQuoteState::Unpaid,
             extra_json: None,
-            estimated_blocks: Some(
-                match PaymentTier::from_optional_str(onchain_options.tier.as_deref()) {
-                    PaymentTier::Immediate => 1,
-                    PaymentTier::Standard => 6,
-                    PaymentTier::Economy => 144,
-                },
-            ),
+            estimated_blocks: Some(estimated_blocks),
+            fee_options: Some(vec![MeltQuoteOnchainFeeOption {
+                fee: Amount::from(fee_reserve_sat),
+                estimated_blocks,
+            }]),
         })
     }
 

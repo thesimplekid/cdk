@@ -625,7 +625,7 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
     };
 
     let unit = CurrencyUnit::from_str(&unit)?;
-    Ok(MeltQuote::from_db(
+    MeltQuote::from_db(
         QuoteId::from_str(&id)?,
         unit,
         request,
@@ -643,7 +643,8 @@ fn sql_row_to_melt_quote(row: Vec<Column>) -> Result<mint::MeltQuote, Error> {
         estimated_blocks,
         fee_options,
         selected_estimated_blocks,
-    ))
+    )
+    .map_err(|e| Error::Internal(format!("Invalid onchain melt quote row: {e}")))
 }
 
 #[async_trait]
@@ -948,6 +949,13 @@ where
     }
 
     async fn add_melt_quote(&mut self, quote: mint::MeltQuote) -> Result<(), Self::Err> {
+        // `fee_options` is captured by value here so the subsequent chained
+        // binds can move fields out of `quote` without a borrow conflict.
+        // It is also never rewritten after insert (see the UPDATE queries
+        // below) — the NUT rule "fixed for the lifetime of the quote" is
+        // enforced by never touching this column on update.
+        let fee_options_json = serde_json::to_string(quote.fee_options()).ok();
+
         // Now insert the new quote
         query(
             r#"
@@ -978,7 +986,7 @@ where
         .bind("estimated_blocks", quote.estimated_blocks.map(i64::from))
         .bind(
             "fee_options",
-            serde_json::to_string(&quote.fee_options).ok(),
+            fee_options_json,
         )
         .bind(
             "selected_estimated_blocks",
@@ -1034,22 +1042,30 @@ where
 
         check_melt_quote_state_transition(old_state, state)?;
 
+        // NOTE: `fee_options` is intentionally omitted from both UPDATE
+        // queries below. Per the NUT spec the returned `fee_options` are
+        // fixed for the lifetime of the quote, so we never rewrite them
+        // after insert. Only state/paid_time/payment_proof/fee_reserve/
+        // estimated_blocks/selected_estimated_blocks may change over the
+        // quote's lifetime.
         let rec = if state == MeltQuoteState::Paid {
             let current_time = unix_time();
             quote.paid_time = Some(current_time);
             quote.payment_proof = payment_proof.clone();
-            query(r#"UPDATE melt_quote SET state = :state, paid_time = :paid_time, payment_proof = :payment_proof, estimated_blocks = :estimated_blocks, selected_estimated_blocks = :selected_estimated_blocks WHERE id = :id"#)?
+            query(r#"UPDATE melt_quote SET state = :state, paid_time = :paid_time, payment_proof = :payment_proof, fee_reserve = :fee_reserve, estimated_blocks = :estimated_blocks, selected_estimated_blocks = :selected_estimated_blocks WHERE id = :id"#)?
                 .bind("state", state.to_string())
                 .bind("paid_time", current_time as i64)
                 .bind("payment_proof", payment_proof)
+                .bind("fee_reserve", quote.fee_reserve().value() as i64)
                 .bind("estimated_blocks", quote.estimated_blocks.map(i64::from))
                 .bind("selected_estimated_blocks", quote.selected_estimated_blocks.map(i64::from))
                 .bind("id", quote.id.to_string())
                 .execute(&self.inner)
                 .await
         } else {
-            query(r#"UPDATE melt_quote SET state = :state, estimated_blocks = :estimated_blocks, selected_estimated_blocks = :selected_estimated_blocks WHERE id = :id"#)?
+            query(r#"UPDATE melt_quote SET state = :state, fee_reserve = :fee_reserve, estimated_blocks = :estimated_blocks, selected_estimated_blocks = :selected_estimated_blocks WHERE id = :id"#)?
                 .bind("state", state.to_string())
+                .bind("fee_reserve", quote.fee_reserve().value() as i64)
                 .bind("estimated_blocks", quote.estimated_blocks.map(i64::from))
                 .bind("selected_estimated_blocks", quote.selected_estimated_blocks.map(i64::from))
                 .bind("id", quote.id.to_string())

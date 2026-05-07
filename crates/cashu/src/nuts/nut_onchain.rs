@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use super::nut00::CurrencyUnit;
 use super::nut01::PublicKey;
+use super::nut05::MeltRequest;
 use super::MeltQuoteState;
 #[cfg(feature = "mint")]
 use crate::quote_id::QuoteId;
 use crate::util::serde_helpers::deserialize_empty_string_as_none;
-use crate::Amount;
+use crate::{Amount, Proofs};
 
 /// Mint quote onchain request
 ///
@@ -99,7 +100,46 @@ pub struct MeltQuoteOnchainRequest {
     pub amount: Amount,
 }
 
+/// Melt onchain request
+///
+/// Request to execute an onchain melt quote. The wallet selects one of the
+/// quote's fee options by including that option's `estimated_blocks` value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
+#[serde(bound = "Q: Serialize + DeserializeOwned")]
+pub struct MeltOnchainRequest<Q> {
+    /// Quote ID
+    pub quote: Q,
+    /// Selected estimated confirmation target from the quote's `fee_options`
+    pub estimated_blocks: u32,
+    /// Proofs
+    #[cfg_attr(feature = "swagger", schema(value_type = Vec<crate::Proof>))]
+    pub inputs: Proofs,
+}
+
+impl<Q> From<MeltOnchainRequest<Q>> for MeltRequest<Q>
+where
+    Q: Serialize + DeserializeOwned,
+{
+    fn from(request: MeltOnchainRequest<Q>) -> Self {
+        MeltRequest::new(request.quote, request.inputs, None)
+            .estimated_blocks(request.estimated_blocks)
+    }
+}
+
 /// Fee option for an onchain melt quote.
+///
+/// Each item in an onchain melt quote's `fee_options` represents one
+/// available fee and confirmation estimate for the same payment. The wallet
+/// selects one option when executing the quote by echoing its
+/// `estimated_blocks` value in the melt request.
+///
+/// The mint enforces these NUT rules on the `fee_options` list as a whole:
+///
+/// - MUST return at least one item.
+/// - MUST NOT contain two items with the same `estimated_blocks`.
+/// - MUST NOT contain two items with the same `fee`.
+/// - The list is fixed for the lifetime of the quote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
 pub struct MeltQuoteOnchainFeeOption {
@@ -127,20 +167,26 @@ pub struct MeltQuoteOnchainFeeOption {
 pub struct MeltQuoteOnchainResponse<Q> {
     /// Quote Id
     pub quote: Q,
-    /// Bitcoin address to send to
-    pub request: String,
     /// Amount to be melted
     pub amount: Amount,
     /// Unit
     pub unit: CurrencyUnit,
-    /// Fee options for the transaction
-    pub fee_options: Vec<MeltQuoteOnchainFeeOption>,
-    /// Selected confirmation target once the quote is executed
-    pub selected_estimated_blocks: Option<u32>,
     /// Quote state
     pub state: MeltQuoteState,
     /// Unix timestamp until the quote is valid
     pub expiry: u64,
+    /// Bitcoin address to send to
+    pub request: String,
+    /// Fee options for the transaction.
+    ///
+    /// Each entry represents one fee/confirmation-target pair the mint is
+    /// willing to honor for this quote. Per NUT the mint MUST return at
+    /// least one entry; MUST NOT return multiple entries with the same
+    /// `estimated_blocks` or the same `fee`; and the list is fixed for the
+    /// lifetime of the quote.
+    pub fee_options: Vec<MeltQuoteOnchainFeeOption>,
+    /// Selected confirmation target once the quote is executed
+    pub selected_estimated_blocks: Option<u32>,
     /// Transaction outpoint (txid:vout) once broadcast
     #[serde(
         default,
@@ -155,13 +201,13 @@ impl<Q: ToString> MeltQuoteOnchainResponse<Q> {
     pub fn to_string_id(&self) -> MeltQuoteOnchainResponse<String> {
         MeltQuoteOnchainResponse {
             quote: self.quote.to_string(),
-            request: self.request.clone(),
             amount: self.amount,
             unit: self.unit.clone(),
-            fee_options: self.fee_options.clone(),
-            selected_estimated_blocks: self.selected_estimated_blocks,
             state: self.state,
             expiry: self.expiry,
+            request: self.request.clone(),
+            fee_options: self.fee_options.clone(),
+            selected_estimated_blocks: self.selected_estimated_blocks,
             outpoint: self.outpoint.clone(),
         }
     }
@@ -172,13 +218,13 @@ impl From<MeltQuoteOnchainResponse<QuoteId>> for MeltQuoteOnchainResponse<String
     fn from(value: MeltQuoteOnchainResponse<QuoteId>) -> Self {
         Self {
             quote: value.quote.to_string(),
-            request: value.request,
             amount: value.amount,
             unit: value.unit,
-            fee_options: value.fee_options,
-            selected_estimated_blocks: value.selected_estimated_blocks,
             state: value.state,
             expiry: value.expiry,
+            request: value.request,
+            fee_options: value.fee_options,
+            selected_estimated_blocks: value.selected_estimated_blocks,
             outpoint: value.outpoint,
         }
     }
@@ -225,16 +271,16 @@ mod tests {
     fn test_melt_quote_onchain_response_serialization() {
         let response: MeltQuoteOnchainResponse<String> = MeltQuoteOnchainResponse {
             quote: "TRmjduhIsPxd...".to_string(),
-            request: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh".to_string(),
             amount: Amount::from(100000),
             unit: CurrencyUnit::Sat,
+            state: MeltQuoteState::Pending,
+            expiry: 1701704757,
+            request: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh".to_string(),
             fee_options: vec![MeltQuoteOnchainFeeOption {
                 fee: Amount::from(5000),
                 estimated_blocks: 1,
             }],
             selected_estimated_blocks: Some(1),
-            state: MeltQuoteState::Pending,
-            expiry: 1701704757,
             outpoint: Some(
                 "3b7f3b85c5f1a3c4d2b8e9f6a7c5d8e9f1a2b3c4d5e6f7a8b9c1d2e3f4a5b6c7:2".to_string(),
             ),
@@ -286,16 +332,16 @@ mod tests {
 
         let response: MeltQuoteOnchainResponse<String> = MeltQuoteOnchainResponse {
             quote: "TRmjduhIsPxd...".to_string(),
-            request: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh".to_string(),
             amount: Amount::from(100000),
             unit: CurrencyUnit::Sat,
+            state: MeltQuoteState::Pending,
+            expiry: 1701704757,
+            request: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh".to_string(),
             fee_options: vec![MeltQuoteOnchainFeeOption {
                 fee: Amount::from(5000),
                 estimated_blocks: 1,
             }],
             selected_estimated_blocks: Some(1),
-            state: MeltQuoteState::Pending,
-            expiry: 1701704757,
             outpoint: Some(
                 "3b7f3b85c5f1a3c4d2b8e9f6a7c5d8e9f1a2b3c4d5e6f7a8b9c1d2e3f4a5b6c7:2".to_string(),
             ),

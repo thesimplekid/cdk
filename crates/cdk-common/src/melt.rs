@@ -307,13 +307,13 @@ where
             PaymentMethod::Known(KnownMethod::Onchain) => {
                 Self::Onchain(crate::nuts::nut_onchain::MeltQuoteOnchainResponse {
                     quote: value.id.clone().into(),
-                    request: value.request.to_string(),
                     amount: value.amount().into(),
                     unit: value.unit.clone(),
-                    fee_options: value.fee_options.clone(),
-                    selected_estimated_blocks: value.selected_estimated_blocks,
                     state: value.state,
                     expiry: value.expiry,
+                    request: value.request.to_string(),
+                    fee_options: value.fee_options().to_vec(),
+                    selected_estimated_blocks: value.selected_estimated_blocks,
                     outpoint: value.payment_proof.clone(),
                 })
             }
@@ -375,16 +375,16 @@ mod tests {
     fn onchain_response(quote: &str) -> MeltQuoteOnchainResponse<String> {
         MeltQuoteOnchainResponse {
             quote: quote.to_string(),
-            request: "bc1qonchainaddress".to_string(),
             amount: Amount::from(400),
             unit: CurrencyUnit::Sat,
+            state: MeltQuoteState::Paid,
+            expiry: 4000,
+            request: "bc1qonchainaddress".to_string(),
             fee_options: vec![MeltQuoteOnchainFeeOption {
                 fee: Amount::from(4),
                 estimated_blocks: 6,
             }],
             selected_estimated_blocks: Some(6),
-            state: MeltQuoteState::Paid,
-            expiry: 4000,
             outpoint: Some("abcd...ef:0".to_string()),
         }
     }

@@ -16,6 +16,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::mint::{MeltPaymentRequest, MeltQuote};
+use crate::nuts::nut_onchain::MeltQuoteOnchainFeeOption;
 use crate::nuts::{CurrencyUnit, MeltQuoteState};
 use crate::{Amount, QuoteId};
 
@@ -575,8 +576,26 @@ pub struct PaymentQuoteResponse {
     pub state: MeltQuoteState,
     /// Extra payment-method-specific fields
     pub extra_json: Option<serde_json::Value>,
-    /// Estimated confirmation target in blocks for onchain quotes
+    /// Estimated confirmation target in blocks for onchain quotes.
+    ///
+    /// Onchain backends must return explicit `fee_options`; this field remains
+    /// a convenience mirror of the quoted or selected confirmation target.
     pub estimated_blocks: Option<u32>,
+    /// Explicit onchain fee options the backend is willing to honor.
+    ///
+    /// For onchain melt quotes the mint enforces the NUT `fee_options` rules:
+    ///
+    /// - MUST be non-empty.
+    /// - MUST NOT contain duplicate `estimated_blocks` values.
+    /// - MUST NOT contain duplicate `fee` values.
+    ///
+    /// Onchain backends must return `Some(vec)` here. Violations produce
+    /// [`Error::OnchainFeeOptionsEmpty`](crate::Error::OnchainFeeOptionsEmpty),
+    /// [`Error::OnchainFeeOptionsDuplicateBlocks`](crate::Error::OnchainFeeOptionsDuplicateBlocks),
+    /// or
+    /// [`Error::OnchainFeeOptionsDuplicateFee`](crate::Error::OnchainFeeOptionsDuplicateFee)
+    /// and the quote is not persisted.
+    pub fee_options: Option<Vec<MeltQuoteOnchainFeeOption>>,
 }
 
 impl PaymentQuoteResponse {

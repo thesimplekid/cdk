@@ -552,12 +552,9 @@ impl Mint {
             amount: melt_request.amount.with_unit(unit.clone()),
             max_fee_amount: None,
             quote_id: quote_id.clone(),
-            // TODO(#TBD): Emit one quote per supported tier
-            // (immediate/standard/economy) and persist the tier on each
-            // MeltQuote. Today a single tier-less quote is produced, making
-            // Standard/Economy batching in cdk-bdk unreachable via the
-            // standard melt flow. Matching load-bearing site:
-            // crates/cdk-common/src/payment.rs (from_melt_quote_with_fee).
+            // TODO(#TBD): Let wallets request a specific tier when creating
+            // an onchain quote. Today the default backend tier is used until
+            // the wallet selects one of the returned `fee_options`.
             tier: None,
             metadata: None,
         };
@@ -613,21 +610,28 @@ impl Mint {
         // the validated echo.
         let request_lookup_id = Some(PaymentIdentifier::QuoteId(quote_id.clone()));
 
-        let quote = MeltQuote::new(
+        // Onchain backends must return explicit `fee_options`; the mint
+        // validates them before persisting the quote.
+        let Some(fee_options) = payment_quote.fee_options.clone() else {
+            return Err(Error::OnchainFeeOptionsEmpty);
+        };
+
+        // `MeltQuote::new_onchain` applies the NUT validation
+        // (non-empty + unique estimated_blocks + unique fee). Failures are
+        // returned before the quote is persisted, so a backend that violates
+        // the contract never leaves state behind in the mint.
+        let quote = MeltQuote::new_onchain(
             Some(quote_id),
             MeltPaymentRequest::Onchain {
                 address: melt_request.request.clone(),
             },
             unit.clone(),
             payment_quote.amount,
-            payment_quote.fee,
             unix_time() + melt_ttl,
             request_lookup_id,
-            None,
-            PaymentMethod::Known(KnownMethod::Onchain),
             payment_quote.extra_json,
-            payment_quote.estimated_blocks,
-        );
+            fee_options,
+        )?;
 
         let mut tx = self.localstore.begin_transaction().await?;
         tx.add_melt_quote(quote.clone()).await?;

@@ -11,10 +11,15 @@
 use std::str::FromStr;
 
 use cdk_common::melt::MeltQuoteRequest;
-use cdk_common::mint::{MeltFinalizationData, MeltSagaState, OperationKind, Saga, SagaStateEnum};
+use cdk_common::mint::{
+    MeltFinalizationData, MeltPaymentRequest, MeltQuote, MeltSagaState, OperationKind, Saga,
+    SagaStateEnum,
+};
 use cdk_common::nut00::KnownMethod;
+use cdk_common::nuts::nut_onchain::MeltQuoteOnchainFeeOption;
 use cdk_common::nuts::{MeltQuoteBolt11Request, MeltQuoteState, MintQuoteState};
 use cdk_common::payment::PaymentIdentifier;
+use cdk_common::util::unix_time;
 use cdk_common::{Amount, MintQuoteBolt11Request, PaymentMethod, ProofsMethods, State};
 
 use crate::mint::melt::melt_saga::{MeltSaga, PaymentOutcome};
@@ -34,6 +39,74 @@ async fn test_melt_saga_initial_state_creation() {
 
     let _saga = MeltSaga::new(std::sync::Arc::new(mint.clone()), db, pubsub);
     // Type system enforces Initial state - if this compiles, test passes
+}
+
+#[tokio::test]
+async fn test_onchain_setup_uses_selected_fee_option_for_balance() {
+    let mint = create_test_mint().await.unwrap();
+    let quote = create_test_onchain_melt_quote(&mint).await;
+
+    let proofs = mint_test_proofs(&mint, Amount::from(9_500)).await.unwrap();
+    let melt_request = create_test_melt_request(&proofs, &quote).estimated_blocks(1);
+    let verification = mint.verify_inputs(melt_request.inputs()).await.unwrap();
+
+    let saga = MeltSaga::new(
+        std::sync::Arc::new(mint.clone()),
+        mint.localstore(),
+        mint.pubsub_manager(),
+    );
+    let setup = saga
+        .setup_melt(
+            &melt_request,
+            verification,
+            PaymentMethod::Known(KnownMethod::Onchain),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(setup.state_data.quote.selected_estimated_blocks, Some(1));
+    assert_eq!(setup.state_data.quote.fee_reserve().value(), 500);
+
+    let stored = mint
+        .localstore()
+        .get_melt_quote(&quote.id)
+        .await
+        .unwrap()
+        .expect("quote must remain persisted");
+    assert_eq!(stored.selected_estimated_blocks, Some(1));
+    assert_eq!(stored.fee_reserve().value(), 500);
+}
+
+#[tokio::test]
+async fn test_onchain_setup_rejects_amount_for_unselected_fee_option() {
+    let mint = create_test_mint().await.unwrap();
+    let quote = create_test_onchain_melt_quote(&mint).await;
+
+    let proofs = mint_test_proofs(&mint, Amount::from(9_200)).await.unwrap();
+    let melt_request = create_test_melt_request(&proofs, &quote).estimated_blocks(1);
+    let verification = mint.verify_inputs(melt_request.inputs()).await.unwrap();
+
+    let saga = MeltSaga::new(
+        std::sync::Arc::new(mint.clone()),
+        mint.localstore(),
+        mint.pubsub_manager(),
+    );
+    let err = match saga
+        .setup_melt(
+            &melt_request,
+            verification,
+            PaymentMethod::Known(KnownMethod::Onchain),
+        )
+        .await
+    {
+        Ok(_) => panic!("selected fee option must drive exact onchain balance"),
+        Err(err) => err,
+    };
+
+    assert!(matches!(
+        err,
+        cdk_common::Error::TransactionUnbalanced(9_200, 9_000, 500)
+    ));
 }
 
 // ============================================================================
@@ -3223,6 +3296,43 @@ async fn create_test_melt_quote(
         .await
         .unwrap()
         .expect("Quote should exist in database");
+
+    quote
+}
+
+async fn create_test_onchain_melt_quote(mint: &crate::mint::Mint) -> cdk_common::mint::MeltQuote {
+    let quote = MeltQuote::new_onchain(
+        None,
+        MeltPaymentRequest::Onchain {
+            address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq".to_string(),
+        },
+        cdk_common::CurrencyUnit::Sat,
+        Amount::new(9_000, cdk_common::CurrencyUnit::Sat),
+        unix_time() + 3600,
+        None,
+        None,
+        vec![
+            MeltQuoteOnchainFeeOption {
+                fee: Amount::from(500),
+                estimated_blocks: 1,
+            },
+            MeltQuoteOnchainFeeOption {
+                fee: Amount::from(200),
+                estimated_blocks: 6,
+            },
+        ],
+    )
+    .expect("well-formed onchain quote must construct");
+
+    let mut tx = mint
+        .localstore()
+        .begin_transaction()
+        .await
+        .expect("transaction must start");
+    tx.add_melt_quote(quote.clone())
+        .await
+        .expect("quote must persist");
+    tx.commit().await.expect("quote transaction must commit");
 
     quote
 }
