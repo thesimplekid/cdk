@@ -904,7 +904,7 @@ impl MeltQuote {
         let fee_options = estimated_blocks
             .map(|estimated_blocks| {
                 vec![MeltQuoteOnchainFeeOption {
-                    fee: fee_reserve.clone().into(),
+                    fee_reserve: fee_reserve.clone().into(),
                     estimated_blocks,
                 }]
             })
@@ -937,7 +937,7 @@ impl MeltQuote {
     ///
     /// 1. At least one entry (`OnchainFeeOptionsEmpty`).
     /// 2. No duplicate `estimated_blocks` (`OnchainFeeOptionsDuplicateBlocks`).
-    /// 3. No duplicate `fee` values (`OnchainFeeOptionsDuplicateFee`).
+    /// 3. No duplicate `fee_reserve` values (`OnchainFeeOptionsDuplicateFee`).
     ///
     /// `fee_reserve` is initialized to the lowest-fee option so the quote has
     /// a definite reserve before the wallet selects a tier. Once the wallet
@@ -960,18 +960,18 @@ impl MeltQuote {
 
         let id = id.unwrap_or_else(QuoteId::new_uuid);
 
-        // Pick the lowest-fee option as the initial reserve. All options
-        // have unique fees at this point (validated above), so `min_by_key`
+        // Pick the lowest-reserve option as the initial reserve. All options
+        // have unique fee reserves at this point (validated above), so `min_by_key`
         // selects a single canonical entry. The `ok_or` is unreachable —
         // `validate_onchain_fee_options` rejects empty input — but we use
         // it instead of `expect` to avoid a needless panic path.
         let initial = fee_options
             .iter()
-            .min_by_key(|option| u64::from(option.fee))
+            .min_by_key(|option| u64::from(option.fee_reserve))
             .copied()
             .ok_or(crate::Error::OnchainFeeOptionsEmpty)?;
 
-        let fee_reserve = initial.fee.with_unit(unit.clone());
+        let fee_reserve = initial.fee_reserve.with_unit(unit.clone());
         let estimated_blocks = Some(initial.estimated_blocks);
 
         Ok(Self {
@@ -999,7 +999,7 @@ impl MeltQuote {
     ///
     /// For non-onchain quotes this returns an empty slice. For onchain quotes
     /// this is guaranteed non-empty with unique `estimated_blocks` and unique
-    /// `fee` values (enforced at construction in
+    /// `fee_reserve` values (enforced at construction in
     /// [`MeltQuote::new_onchain`] and on reload in [`MeltQuote::from_db`]).
     #[inline]
     pub fn fee_options(&self) -> &[MeltQuoteOnchainFeeOption] {
@@ -1024,7 +1024,7 @@ impl MeltQuote {
             .fee_options
             .iter()
             .find(|option| option.estimated_blocks == estimated_blocks)
-            .map(|option| option.fee.with_unit(self.unit.clone()))
+            .map(|option| option.fee_reserve.with_unit(self.unit.clone()))
             .ok_or(crate::Error::InvalidPaymentRequest)?;
 
         if self
@@ -1064,10 +1064,8 @@ impl MeltQuote {
                 crate::MeltQuoteResponse::Bolt12(response)
             }
             PaymentMethod::Known(cashu::nuts::nut00::KnownMethod::Onchain) => {
-                // Onchain melts never return NUT-08 change outputs; drop them
-                // explicitly (mirrors check_melt_quote).
-                let _ = change;
-                let response: MeltQuoteOnchainResponse<QuoteId> = self.into();
+                let mut response: MeltQuoteOnchainResponse<QuoteId> = self.into();
+                response.change = change;
                 crate::MeltQuoteResponse::Onchain(response)
             }
             _ => {
@@ -1143,7 +1141,7 @@ impl MeltQuote {
 ///
 /// Per spec, for every onchain melt quote the mint MUST return at least one
 /// `fee_options` item and MUST NOT return multiple items with the same
-/// `estimated_blocks` or `fee` value.
+/// `estimated_blocks` or `fee_reserve` value.
 ///
 /// Returns:
 /// - [`Error::OnchainFeeOptionsEmpty`](crate::Error::OnchainFeeOptionsEmpty)
@@ -1151,7 +1149,7 @@ impl MeltQuote {
 /// - [`Error::OnchainFeeOptionsDuplicateBlocks`](crate::Error::OnchainFeeOptionsDuplicateBlocks)
 ///   when two entries share an `estimated_blocks` value.
 /// - [`Error::OnchainFeeOptionsDuplicateFee`](crate::Error::OnchainFeeOptionsDuplicateFee)
-///   when two entries share a `fee` value.
+///   when two entries share a `fee_reserve` value.
 pub fn validate_onchain_fee_options(
     fee_options: &[MeltQuoteOnchainFeeOption],
 ) -> Result<(), crate::Error> {
@@ -1168,7 +1166,7 @@ pub fn validate_onchain_fee_options(
                 blocks: option.estimated_blocks,
             });
         }
-        let fee_raw: u64 = option.fee.into();
+        let fee_raw: u64 = option.fee_reserve.into();
         if !seen_fees.insert(fee_raw) {
             return Err(crate::Error::OnchainFeeOptionsDuplicateFee { fee: fee_raw });
         }
@@ -1189,6 +1187,7 @@ impl From<MeltQuote> for MeltQuoteOnchainResponse<QuoteId> {
             fee_options: quote.fee_options().to_vec(),
             selected_estimated_blocks: quote.selected_estimated_blocks,
             outpoint: quote.payment_proof.clone(),
+            change: None,
         }
     }
 }
@@ -1669,8 +1668,6 @@ mod tests {
         let expected_state = melt_quote.state;
         let expected_outpoint = melt_quote.payment_proof.clone();
 
-        // `change` MUST be dropped for onchain, and variant MUST be `Onchain`
-        // (not `Custom`). This is the regression this test exists to guard.
         let response = melt_quote.into_response(None);
         match response {
             crate::MeltQuoteResponse::Onchain(r) => {
@@ -1683,13 +1680,14 @@ mod tests {
                 assert_eq!(r.state, expected_state);
                 assert_eq!(r.expiry, expected_expiry);
                 assert_eq!(r.outpoint, expected_outpoint);
+                assert_eq!(r.change, None);
             }
             _ => panic!("expected MeltQuoteResponse::Onchain variant"),
         }
     }
 
     #[test]
-    fn test_melt_quote_into_response_onchain_drops_change() {
+    fn test_melt_quote_into_response_onchain_includes_change() {
         let address = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
         let melt_quote = MeltQuote::new(
             Some(QuoteId::new_uuid()),
@@ -1707,10 +1705,11 @@ mod tests {
             Some(3),
         );
 
-        // Even if a caller mistakenly passes change for an onchain quote, it
-        // must still produce the Onchain variant (and the change is dropped).
         let response = melt_quote.into_response(Some(vec![]));
-        assert!(matches!(response, crate::MeltQuoteResponse::Onchain(_)));
+        match response {
+            crate::MeltQuoteResponse::Onchain(r) => assert_eq!(r.change, Some(vec![])),
+            _ => panic!("expected MeltQuoteResponse::Onchain variant"),
+        }
     }
 
     #[test]
@@ -1723,11 +1722,11 @@ mod tests {
     fn validate_onchain_fee_options_rejects_duplicate_estimated_blocks() {
         let options = [
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(10),
+                fee_reserve: Amount::from(10),
                 estimated_blocks: 3,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(20),
+                fee_reserve: Amount::from(20),
                 estimated_blocks: 3,
             },
         ];
@@ -1743,11 +1742,11 @@ mod tests {
     fn validate_onchain_fee_options_rejects_duplicate_fee() {
         let options = [
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(42),
+                fee_reserve: Amount::from(42),
                 estimated_blocks: 1,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(42),
+                fee_reserve: Amount::from(42),
                 estimated_blocks: 6,
             },
         ];
@@ -1761,15 +1760,15 @@ mod tests {
     fn validate_onchain_fee_options_accepts_well_formed() {
         let options = [
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(500),
+                fee_reserve: Amount::from(500),
                 estimated_blocks: 1,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(200),
+                fee_reserve: Amount::from(200),
                 estimated_blocks: 6,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(50),
+                fee_reserve: Amount::from(50),
                 estimated_blocks: 144,
             },
         ];
@@ -1798,15 +1797,15 @@ mod tests {
     fn new_onchain_initializes_reserve_to_cheapest_tier() {
         let options = vec![
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(500),
+                fee_reserve: Amount::from(500),
                 estimated_blocks: 1,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(50),
+                fee_reserve: Amount::from(50),
                 estimated_blocks: 144,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(200),
+                fee_reserve: Amount::from(200),
                 estimated_blocks: 6,
             },
         ];
@@ -1834,11 +1833,11 @@ mod tests {
     fn select_onchain_fee_option_leaves_fee_options_untouched() {
         let options = vec![
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(500),
+                fee_reserve: Amount::from(500),
                 estimated_blocks: 1,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(200),
+                fee_reserve: Amount::from(200),
                 estimated_blocks: 6,
             },
         ];
@@ -1875,11 +1874,11 @@ mod tests {
     fn from_db_rejects_duplicate_onchain_fee_options() {
         let options = vec![
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(100),
+                fee_reserve: Amount::from(100),
                 estimated_blocks: 6,
             },
             MeltQuoteOnchainFeeOption {
-                fee: Amount::from(200),
+                fee_reserve: Amount::from(200),
                 estimated_blocks: 6,
             },
         ];

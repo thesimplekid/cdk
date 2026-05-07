@@ -159,9 +159,13 @@ impl<'a> PendingMelt<'a> {
                             response.change,
                         ),
                         NotificationPayload::MeltQuoteOnchainResponse(response) => {
-                            // Onchain melts never return NUT-08 change outputs;
-                            // the outpoint is surfaced as the payment proof.
-                            (response.quote, response.state, response.outpoint, None)
+                            // The outpoint is surfaced as the payment proof.
+                            (
+                                response.quote,
+                                response.state,
+                                response.outpoint,
+                                response.change,
+                            )
                         }
                         _ => continue,
                     };
@@ -317,13 +321,11 @@ impl MeltQuoteStatusResponse {
     }
 
     /// Get the change signatures
-    ///
-    /// Onchain melts never return NUT-08 change outputs.
     pub fn change(&self) -> Option<Vec<crate::nuts::BlindSignature>> {
         match self {
             Self::Standard(r) => r.change.clone(),
             Self::Bolt12(r) => r.change.clone(),
-            Self::Onchain(_) => None,
+            Self::Onchain(r) => r.change.clone(),
             Self::Custom(r) => r.change.clone(),
         }
     }
@@ -351,15 +353,14 @@ impl MeltQuoteStatusResponse {
                             .find(|option| option.estimated_blocks == selected)
                     })
                     .or_else(|| r.fee_options.first())
-                    .map(|option| option.fee)
+                    .map(|option| option.fee_reserve)
                     .unwrap_or(Amount::ZERO),
                 state: r.state,
                 expiry: r.expiry,
                 // Onchain uses `outpoint` as payment proof; surface it here
                 // via the `payment_preimage` slot for parity with Bolt11/Bolt12.
                 payment_preimage: r.outpoint,
-                // Onchain melts never return NUT-08 change.
-                change: None,
+                change: r.change,
                 request: Some(r.request),
                 unit: Some(r.unit),
             }),
@@ -1359,12 +1360,15 @@ impl Wallet {
                     cdk_common::MeltQuoteResponse::Onchain(response) => response,
                     _ => return Err(Error::InvalidPaymentMethod),
                 };
-                // Onchain melts never return NUT-08 change outputs.
+                let change_amount = response
+                    .change
+                    .as_ref()
+                    .and_then(|change| Amount::try_sum(change.iter().map(|sig| sig.amount)).ok());
                 self.update_melt_quote_state(
                     &mut quote,
                     response.state,
                     response.amount,
-                    None,
+                    change_amount,
                     response.outpoint.clone(),
                 )
                 .await?;

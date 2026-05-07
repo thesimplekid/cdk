@@ -18,7 +18,7 @@ fn wallet_melt_quote_from_onchain_response(
         amount: response.amount,
         request: response.request,
         unit: unit.clone(),
-        fee_reserve: fee_option.fee,
+        fee_reserve: fee_option.fee_reserve,
         state: response.state,
         expiry: response.expiry,
         payment_proof: response.outpoint.clone(),
@@ -58,7 +58,7 @@ impl Wallet {
 
         for fee_option in quote_res.fee_options.clone() {
             if let Some(max_fee) = max_fee_amount {
-                if fee_option.fee > max_fee {
+                if fee_option.fee_reserve > max_fee {
                     continue;
                 }
             }

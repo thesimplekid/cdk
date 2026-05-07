@@ -617,7 +617,7 @@ impl Mint {
         };
 
         // `MeltQuote::new_onchain` applies the NUT validation
-        // (non-empty + unique estimated_blocks + unique fee). Failures are
+        // (non-empty + unique estimated_blocks + unique fee_reserve). Failures are
         // returned before the quote is persisted, so a backend that violates
         // the contract never leaves state behind in the mint.
         let quote = MeltQuote::new_onchain(
@@ -859,9 +859,8 @@ impl Mint {
                 })
             }
             PaymentMethod::Known(KnownMethod::Onchain) => {
-                // Onchain melts never return NUT-08 change outputs.
-                let _ = change;
-                let response: MeltQuoteOnchainResponse<QuoteId> = quote.clone().into();
+                let mut response: MeltQuoteOnchainResponse<QuoteId> = quote.clone().into();
+                response.change = change.clone();
                 MeltQuoteResponse::Onchain(response)
             }
             _ => {

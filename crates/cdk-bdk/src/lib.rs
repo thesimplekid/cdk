@@ -457,7 +457,7 @@ impl MintPayment for CdkBdk {
             extra_json: None,
             estimated_blocks: Some(estimated_blocks),
             fee_options: Some(vec![MeltQuoteOnchainFeeOption {
-                fee: Amount::from(fee_reserve_sat),
+                fee_reserve: Amount::from(fee_reserve_sat),
                 estimated_blocks,
             }]),
         })

@@ -200,7 +200,7 @@ message PaymentQuoteResponse {
 }
 
 message OnchainFeeOption {
-  uint64 fee = 1;
+  uint64 fee_reserve = 1;
   uint32 estimated_blocks = 2;
 }
 

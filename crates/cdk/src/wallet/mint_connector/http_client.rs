@@ -602,6 +602,7 @@ where
                         .selected_estimated_blocks()
                         .ok_or(Error::InvalidPaymentRequest)?,
                     inputs: request.inputs().clone(),
+                    outputs: request.outputs().clone(),
                 };
                 let res: cdk_common::nuts::MeltQuoteOnchainResponse<String> = self
                     .retriable_http_request(nut19::Method::Post, path, auth_token, &request)

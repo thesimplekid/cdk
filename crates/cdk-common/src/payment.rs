@@ -587,7 +587,7 @@ pub struct PaymentQuoteResponse {
     ///
     /// - MUST be non-empty.
     /// - MUST NOT contain duplicate `estimated_blocks` values.
-    /// - MUST NOT contain duplicate `fee` values.
+    /// - MUST NOT contain duplicate `fee_reserve` values.
     ///
     /// Onchain backends must return `Some(vec)` here. Violations produce
     /// [`Error::OnchainFeeOptionsEmpty`](crate::Error::OnchainFeeOptionsEmpty),

@@ -232,7 +232,7 @@ impl From<CdkPaymentQuoteResponse> for PaymentQuoteResponse {
 impl From<MeltQuoteOnchainFeeOption> for OnchainFeeOption {
     fn from(value: MeltQuoteOnchainFeeOption) -> Self {
         Self {
-            fee: value.fee.into(),
+            fee_reserve: value.fee_reserve.into(),
             estimated_blocks: value.estimated_blocks,
         }
     }
@@ -241,7 +241,7 @@ impl From<MeltQuoteOnchainFeeOption> for OnchainFeeOption {
 impl From<OnchainFeeOption> for MeltQuoteOnchainFeeOption {
     fn from(value: OnchainFeeOption) -> Self {
         Self {
-            fee: value.fee.into(),
+            fee_reserve: value.fee_reserve.into(),
             estimated_blocks: value.estimated_blocks,
         }
     }
@@ -465,7 +465,7 @@ mod tests {
                 "nested": { "attempt": 1 }
             })),
             fee_options: Some(vec![MeltQuoteOnchainFeeOption {
-                fee: Amount::from(2),
+                fee_reserve: Amount::from(2),
                 estimated_blocks: 6,
             }]),
         };

@@ -146,7 +146,7 @@ impl<Q: ToString> MeltQuoteResponse<Q> {
                         .find(|option| option.estimated_blocks == selected)
                 })
                 .or_else(|| r.fee_options.first())
-                .map(|option| option.fee)
+                .map(|option| option.fee_reserve)
                 .unwrap_or(Amount::ZERO),
             Self::Custom((_, r)) => r.fee_reserve,
         }
@@ -191,13 +191,11 @@ impl<Q: ToString> MeltQuoteResponse<Q> {
     }
 
     /// Returns the change signatures when present.
-    ///
-    /// Onchain melts never return NUT-08 change.
     pub fn change(&self) -> Option<&Vec<crate::BlindSignature>> {
         match self {
             Self::Bolt11(r) => r.change.as_ref(),
             Self::Bolt12(r) => r.change.as_ref(),
-            Self::Onchain(_) => None,
+            Self::Onchain(r) => r.change.as_ref(),
             Self::Custom((_, r)) => r.change.as_ref(),
         }
     }
@@ -315,6 +313,7 @@ where
                     fee_options: value.fee_options().to_vec(),
                     selected_estimated_blocks: value.selected_estimated_blocks,
                     outpoint: value.payment_proof.clone(),
+                    change: None,
                 })
             }
             ref method => Self::Custom((
@@ -381,11 +380,12 @@ mod tests {
             expiry: 4000,
             request: "bc1qonchainaddress".to_string(),
             fee_options: vec![MeltQuoteOnchainFeeOption {
-                fee: Amount::from(4),
+                fee_reserve: Amount::from(4),
                 estimated_blocks: 6,
             }],
             selected_estimated_blocks: Some(6),
             outpoint: Some("abcd...ef:0".to_string()),
+            change: None,
         }
     }
 
@@ -438,13 +438,11 @@ mod tests {
         assert_eq!(r.method(), PaymentMethod::Known(KnownMethod::Onchain));
         assert_eq!(r.quote(), "qoc");
         assert_eq!(r.amount(), Amount::from(400));
-        // fee_reserve() reads `fee` on onchain (field name differs from Bolt11/Bolt12)
         assert_eq!(r.fee_reserve(), Amount::from(4));
         assert_eq!(r.state(), MeltQuoteState::Paid);
         assert_eq!(r.expiry(), 4000);
         // payment_proof() is the outpoint, not a Lightning preimage
         assert_eq!(r.payment_proof(), Some("abcd...ef:0"));
-        // Onchain melts never carry NUT-08 change
         assert!(r.change().is_none());
         // `request` is non-Option on onchain; accessor wraps in Some
         assert_eq!(r.request(), Some("bc1qonchainaddress"));

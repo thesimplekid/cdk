@@ -586,6 +586,7 @@ pub async fn cache_post_melt_custom(
 
     let State(mint_state) = state.clone();
     let method = method.0;
+    tracing::debug!(method = %method, "melt request received");
     let parsed_payload = parse_melt_payload(&method, payload.deref().clone())?;
 
     let cache_key = match mint_state.cache.calculate_key(&parsed_payload) {
@@ -624,17 +625,33 @@ pub async fn cache_post_melt_custom(
     Ok(melt_quote_response_to_json(result))
 }
 
+// The `Err` variant carries an axum `Response` (a pre-built 400 with the full
+// body), which is large but matches the style used throughout this module.
+// Refactoring to a boxed/smaller error would be a cross-cutting change outside
+// the scope of this bug fix.
+#[allow(clippy::result_large_err)]
 fn parse_melt_payload(
     method: &str,
     payload: Value,
 ) -> Result<cdk::nuts::MeltRequest<QuoteId>, Response> {
     if method == "onchain" {
-        let request: MeltOnchainRequest<QuoteId> = serde_json::from_value(payload)
-            .map_err(|_| into_response(cdk::Error::InvalidPaymentRequest))?;
+        let request: MeltOnchainRequest<QuoteId> =
+            serde_json::from_value(payload).map_err(|e| {
+                tracing::warn!(
+                    method = %method,
+                    "failed to parse onchain melt request body: {e}",
+                );
+                into_response(cdk::Error::InvalidPaymentRequest)
+            })?;
         Ok(request.into())
     } else {
-        serde_json::from_value(payload)
-            .map_err(|_| into_response(cdk::Error::InvalidPaymentRequest))
+        serde_json::from_value(payload).map_err(|e| {
+            tracing::warn!(
+                method = %method,
+                "failed to parse melt request body: {e}",
+            );
+            into_response(cdk::Error::InvalidPaymentRequest)
+        })
     }
 }
 

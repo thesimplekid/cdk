@@ -174,7 +174,7 @@ async fn create_onchain_test_mint(echo: EchoBehavior) -> Result<Mint, Error> {
     create_onchain_test_mint_with_fee_options(
         echo,
         FeeOptionsBehavior::Explicit(vec![MeltQuoteOnchainFeeOption {
-            fee: Amount::from(10),
+            fee_reserve: Amount::from(10),
             estimated_blocks: 6,
         }]),
     )
@@ -384,11 +384,11 @@ async fn onchain_quote_rejects_empty_fee_options() {
 async fn onchain_quote_rejects_duplicate_estimated_blocks() {
     let dup_blocks = vec![
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(100),
+            fee_reserve: Amount::from(100),
             estimated_blocks: 6,
         },
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(200),
+            fee_reserve: Amount::from(200),
             estimated_blocks: 6,
         },
     ];
@@ -414,17 +414,17 @@ async fn onchain_quote_rejects_duplicate_estimated_blocks() {
     assert!(quotes.is_empty());
 }
 
-/// Backend returns `fee_options` with duplicate `fee` — must reject with
+/// Backend returns `fee_options` with duplicate `fee_reserve` — must reject with
 /// `OnchainFeeOptionsDuplicateFee` and persist nothing.
 #[tokio::test]
 async fn onchain_quote_rejects_duplicate_fee() {
     let dup_fee = vec![
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(100),
+            fee_reserve: Amount::from(100),
             estimated_blocks: 1,
         },
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(100),
+            fee_reserve: Amount::from(100),
             estimated_blocks: 6,
         },
     ];
@@ -456,15 +456,15 @@ async fn onchain_quote_rejects_duplicate_fee() {
 async fn onchain_quote_accepts_multi_tier_fee_options() {
     let tiers = vec![
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(500),
+            fee_reserve: Amount::from(500),
             estimated_blocks: 1,
         },
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(200),
+            fee_reserve: Amount::from(200),
             estimated_blocks: 6,
         },
         MeltQuoteOnchainFeeOption {
-            fee: Amount::from(50),
+            fee_reserve: Amount::from(50),
             estimated_blocks: 144,
         },
     ];
