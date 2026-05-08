@@ -320,6 +320,9 @@ pub struct Bdk {
     /// Minimum receive amount in sats
     #[serde(default = "default_bdk_min_receive_amount_sat")]
     pub min_receive_amount_sat: u64,
+    /// Minimum send amount in sats
+    #[serde(default = "default_bdk_min_send_amount_sat")]
+    pub min_send_amount_sat: u64,
     /// Wallet sync interval in seconds
     #[serde(default = "default_bdk_sync_interval_secs")]
     pub sync_interval_secs: u64,
@@ -343,8 +346,30 @@ impl Default for Bdk {
             batch_config: BatchConfig::default(),
             num_confs: default_bdk_num_confs(),
             min_receive_amount_sat: default_bdk_min_receive_amount_sat(),
+            min_send_amount_sat: default_bdk_min_send_amount_sat(),
             sync_interval_secs: default_bdk_sync_interval_secs(),
         }
+    }
+}
+
+#[cfg(feature = "bdk")]
+impl Bdk {
+    /// Validate BDK settings that must be rejected before the backend starts.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.num_confs == 0 {
+            return Err(
+                "BDK num_confs must be >= 1 (0 is rejected because it still \
+                 requires an on-chain anchor and is almost never intended; \
+                 use 1 for 'any confirmation')"
+                    .to_string(),
+            );
+        }
+
+        if self.min_send_amount_sat == 0 {
+            return Err("BDK min_send_amount_sat must be >= 1".to_string());
+        }
+
+        Ok(())
     }
 }
 
@@ -356,6 +381,11 @@ fn default_bdk_num_confs() -> u32 {
 #[cfg(feature = "bdk")]
 fn default_bdk_min_receive_amount_sat() -> u64 {
     1000
+}
+
+#[cfg(feature = "bdk")]
+fn default_bdk_min_send_amount_sat() -> u64 {
+    546
 }
 
 #[cfg(feature = "bdk")]
@@ -993,6 +1023,14 @@ mod tests {
 
     use super::*;
 
+    #[cfg(feature = "bdk")]
+    fn clear_bdk_env_vars() {
+        std::env::remove_var(crate::env_vars::BDK_MNEMONIC_ENV_VAR);
+        std::env::remove_var(crate::env_vars::BDK_NETWORK_ENV_VAR);
+        std::env::remove_var(crate::env_vars::BDK_MIN_SEND_AMOUNT_SAT_ENV_VAR);
+        std::env::remove_var(crate::env_vars::ENV_ONCHAIN_BACKEND);
+    }
+
     #[test]
     fn test_info_debug_impl() {
         // Create a sample Info struct with test data
@@ -1037,6 +1075,77 @@ mod tests {
 
         // The empty mnemonic should still be hashed
         assert!(debug_output.contains("<hashed: "));
+    }
+
+    #[cfg(feature = "bdk")]
+    #[test]
+    fn test_bdk_default_min_send_amount_sat() {
+        assert_eq!(Bdk::default().min_send_amount_sat, 546);
+    }
+
+    #[cfg(feature = "bdk")]
+    #[test]
+    fn test_bdk_config_min_send_amount_sat_override() {
+        use std::{env, fs};
+
+        let temp_dir = env::temp_dir().join("cdk_test_bdk_min_send_config");
+        fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+        let config_path = temp_dir.join("config.toml");
+
+        let config_content = r#"
+[bdk]
+min_send_amount_sat = 1200
+"#;
+        fs::write(&config_path, config_content).expect("Failed to write config file");
+
+        let settings = Settings::new(Some(&config_path));
+
+        assert_eq!(
+            settings
+                .bdk
+                .as_ref()
+                .expect("bdk config should be present")
+                .min_send_amount_sat,
+            1200
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(feature = "bdk")]
+    #[test]
+    fn test_bdk_env_min_send_amount_sat_override() {
+        clear_bdk_env_vars();
+        std::env::set_var(crate::env_vars::ENV_ONCHAIN_BACKEND, "bdk");
+        std::env::set_var(crate::env_vars::BDK_NETWORK_ENV_VAR, "regtest");
+        std::env::set_var(crate::env_vars::BDK_MIN_SEND_AMOUNT_SAT_ENV_VAR, "777");
+
+        let mut settings = Settings::default();
+        settings.from_env().expect("Failed to apply env vars");
+
+        assert_eq!(
+            settings
+                .bdk
+                .as_ref()
+                .expect("bdk config should be present")
+                .min_send_amount_sat,
+            777
+        );
+
+        clear_bdk_env_vars();
+    }
+
+    #[cfg(feature = "bdk")]
+    #[test]
+    fn test_bdk_min_send_amount_sat_zero_rejected() {
+        let bdk = Bdk {
+            min_send_amount_sat: 0,
+            ..Default::default()
+        };
+
+        let err = bdk.validate().expect_err("zero send minimum should fail");
+
+        assert!(err.contains("min_send_amount_sat"));
     }
 
     #[test]

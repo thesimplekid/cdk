@@ -444,18 +444,7 @@ impl OnchainBackendSetup for crate::config::Bdk {
         use bip39::Mnemonic;
         use bitcoin::Network;
 
-        // Reject `num_confs = 0`: the confirmation check still requires the
-        // transaction to have an on-chain anchor, so 0 actually means
-        // "confirmed in any block" rather than the intuitive "accept
-        // unconfirmed". This is almost never what an operator wants, so fail
-        // fast at startup with a clear error instead of silently accepting it.
-        if self.num_confs == 0 {
-            bail!(
-                "BDK num_confs must be >= 1 (0 is rejected because it still \
-                 requires an on-chain anchor and is almost never intended; \
-                 use 1 for 'any confirmation')"
-            );
-        }
+        self.validate().map_err(anyhow::Error::msg)?;
 
         let fee_reserve = FeeReserve {
             min_fee_reserve: self.reserve_fee_min,
@@ -530,6 +519,7 @@ impl OnchainBackendSetup for crate::config::Bdk {
             Some(self.batch_config.clone().into()),
             self.num_confs,
             self.min_receive_amount_sat,
+            self.min_send_amount_sat,
             self.sync_interval_secs,
             None,
             None,

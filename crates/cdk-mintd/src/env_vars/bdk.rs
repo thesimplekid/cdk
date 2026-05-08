@@ -17,6 +17,7 @@ pub const BDK_NUM_CONFS_ENV_VAR: &str = "CDK_MINTD_BDK_NUM_CONFS";
 pub const BDK_FEE_PERCENT_ENV_VAR: &str = "CDK_MINTD_BDK_FEE_PERCENT";
 pub const BDK_RESERVE_FEE_MIN_ENV_VAR: &str = "CDK_MINTD_BDK_RESERVE_FEE_MIN";
 pub const BDK_MIN_RECEIVE_AMOUNT_SAT_ENV_VAR: &str = "CDK_MINTD_BDK_MIN_RECEIVE_AMOUNT_SAT";
+pub const BDK_MIN_SEND_AMOUNT_SAT_ENV_VAR: &str = "CDK_MINTD_BDK_MIN_SEND_AMOUNT_SAT";
 pub const BDK_SYNC_INTERVAL_SECS_ENV_VAR: &str = "CDK_MINTD_BDK_SYNC_INTERVAL_SECS";
 pub const BDK_BATCH_POLL_INTERVAL_SECS_ENV_VAR: &str = "CDK_MINTD_BDK_BATCH_POLL_INTERVAL_SECS";
 pub const BDK_BATCH_MAX_BATCH_SIZE_ENV_VAR: &str = "CDK_MINTD_BDK_BATCH_MAX_BATCH_SIZE";
@@ -89,6 +90,12 @@ impl Bdk {
         if let Ok(min_receive_amount_sat) = env::var(BDK_MIN_RECEIVE_AMOUNT_SAT_ENV_VAR) {
             if let Ok(min_receive_amount_sat) = min_receive_amount_sat.parse::<u64>() {
                 self.min_receive_amount_sat = min_receive_amount_sat;
+            }
+        }
+
+        if let Ok(min_send_amount_sat) = env::var(BDK_MIN_SEND_AMOUNT_SAT_ENV_VAR) {
+            if let Ok(min_send_amount_sat) = min_send_amount_sat.parse::<u64>() {
+                self.min_send_amount_sat = min_send_amount_sat;
             }
         }
 

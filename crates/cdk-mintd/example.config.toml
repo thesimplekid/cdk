@@ -115,6 +115,8 @@ onchain_backend = "none"
 # mnemonic = "your twelve or twenty-four word mnemonic phrase here"
 # network = "regtest"  # REQUIRED: mainnet, testnet, signet, regtest (no default)
 # num_confs = 3        # Number of confirmations required (must be >= 1; 0 is rejected)
+# min_receive_amount_sat = 1000  # Minimum inbound amount that counts toward minting
+# min_send_amount_sat = 546      # Minimum outbound melt/send amount (must be >= 1)
 # chain_source_type = "bitcoinrpc"  # esplora, bitcoinrpc
 #
 # # Bitcoin RPC configuration (when chain_source_type = "bitcoinrpc")

@@ -630,6 +630,8 @@ pub struct OnchainSettings {
     pub confirmations: u32,
     /// Minimum incoming onchain payment amount accepted by the backend
     pub min_receive_amount_sat: u64,
+    /// Minimum outgoing onchain payment amount accepted by the backend
+    pub min_send_amount_sat: u64,
 }
 
 /// Payment processor settings response

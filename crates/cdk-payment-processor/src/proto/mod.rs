@@ -444,7 +444,7 @@ mod tests {
 
     use cdk_common::nuts::nut_onchain::MeltQuoteOnchainFeeOption;
     use cdk_common::payment::{
-        Event, MakePaymentResponse, PaymentIdentifier,
+        Event, MakePaymentResponse, OnchainSettings, PaymentIdentifier,
         PaymentQuoteResponse as CdkPaymentQuoteResponse, WaitPaymentResponse,
     };
     use cdk_common::{Amount, CurrencyUnit, MeltQuoteState, QuoteId};
@@ -479,6 +479,29 @@ mod tests {
         assert_eq!(roundtrip.state, response.state);
         assert_eq!(roundtrip.extra_json, response.extra_json);
         assert_eq!(roundtrip.fee_options, response.fee_options);
+    }
+
+    #[test]
+    fn onchain_settings_min_send_roundtrip() {
+        let settings = OnchainSettings {
+            confirmations: 3,
+            min_receive_amount_sat: 1_000,
+            min_send_amount_sat: 546,
+        };
+
+        let proto = super::OnchainSettings {
+            confirmations: settings.confirmations,
+            min_receive_amount_sat: settings.min_receive_amount_sat,
+            min_send_amount_sat: settings.min_send_amount_sat,
+        };
+
+        let roundtrip = OnchainSettings {
+            confirmations: proto.confirmations,
+            min_receive_amount_sat: proto.min_receive_amount_sat,
+            min_send_amount_sat: proto.min_send_amount_sat,
+        };
+
+        assert_eq!(roundtrip, settings);
     }
 
     #[test]

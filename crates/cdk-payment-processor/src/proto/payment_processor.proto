@@ -32,6 +32,7 @@ message SettingsResponse {
 message OnchainSettings {
     uint32 confirmations = 1;
     uint64 min_receive_amount_sat = 2;
+    uint64 min_send_amount_sat = 3;
 }
 
 message Bolt12Settings {

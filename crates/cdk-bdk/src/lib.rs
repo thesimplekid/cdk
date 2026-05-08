@@ -94,6 +94,8 @@ pub struct CdkBdk {
     pub(crate) num_confs: u32,
     /// Minimum on-chain receive amount that should count toward minting
     pub(crate) min_receive_amount_sat: u64,
+    /// Minimum on-chain send amount accepted for melts
+    pub(crate) min_send_amount_sat: u64,
     /// Sync interval in seconds
     pub(crate) sync_interval_secs: u64,
     /// Blockchain sync configuration
@@ -183,6 +185,7 @@ impl CdkBdk {
         batch_config: Option<BatchConfig>,
         num_confs: u32,
         min_receive_amount_sat: u64,
+        min_send_amount_sat: u64,
         sync_interval_secs: u64,
         shutdown_timeout_secs: Option<u64>,
         sync_config: Option<SyncConfig>,
@@ -238,6 +241,7 @@ impl CdkBdk {
             batch_notify: Arc::new(Notify::new()),
             num_confs,
             min_receive_amount_sat,
+            min_send_amount_sat,
             sync_interval_secs,
             sync_config: sync_config.unwrap_or_default(),
             fee_rate_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -399,6 +403,7 @@ impl MintPayment for CdkBdk {
             onchain: Some(OnchainSettings {
                 confirmations: self.num_confs,
                 min_receive_amount_sat: self.min_receive_amount_sat,
+                min_send_amount_sat: self.min_send_amount_sat,
             }),
             custom: std::collections::HashMap::new(),
         })
@@ -717,6 +722,7 @@ mod tests {
             None,
             1,
             0,
+            546,
             60,
             Some(shutdown_timeout_secs),
             None,
@@ -802,6 +808,17 @@ mod tests {
             tier_err.is_err(),
             "fee rate estimation should fail against bogus Esplora URL"
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_settings_reports_min_send_amount() {
+        let backend = build_test_instance(5).await;
+
+        let settings = backend.get_settings().await.expect("settings");
+        let onchain = settings.onchain.expect("onchain settings");
+
+        assert_eq!(onchain.min_receive_amount_sat, 0);
+        assert_eq!(onchain.min_send_amount_sat, 546);
     }
 
     // ------------------------------------------------------------------
