@@ -491,6 +491,18 @@ impl TryFrom<ProtectedEndpoint> for cdk::nuts::ProtectedEndpoint {
             "/v1/melt/bolt12" => {
                 cdk::nuts::RoutePath::Melt(NutPaymentMethod::Known(KnownMethod::Bolt12).to_string())
             }
+            "/v1/mint/quote/onchain" => cdk::nuts::RoutePath::MintQuote(
+                NutPaymentMethod::Known(KnownMethod::Onchain).to_string(),
+            ),
+            "/v1/mint/onchain" => cdk::nuts::RoutePath::Mint(
+                NutPaymentMethod::Known(KnownMethod::Onchain).to_string(),
+            ),
+            "/v1/melt/quote/onchain" => cdk::nuts::RoutePath::MeltQuote(
+                NutPaymentMethod::Known(KnownMethod::Onchain).to_string(),
+            ),
+            "/v1/melt/onchain" => cdk::nuts::RoutePath::Melt(
+                NutPaymentMethod::Known(KnownMethod::Onchain).to_string(),
+            ),
             _ => {
                 return Err(FfiError::internal(format!(
                     "Unknown route path: {}",
