@@ -86,6 +86,8 @@ fi
 EXTRA_ARGS=""
 if [[ "$SUITE" == "onchain" ]]; then
     EXTRA_ARGS="--skip-ln"
+    export CDK_BIN_FEATURES="payjoin-regtest"
+    export CDK_ITEST_FEATURES="payjoin-regtest"
 fi
 
 echo "Starting regtest and mints"
@@ -128,7 +130,7 @@ echo "CDK_ITESTS_DIR=$CDK_ITESTS_DIR"
 
 # Validate that we sourced the variables
 if [[ "$SUITE" == "onchain" ]]; then
-    if [ -z "$CDK_TEST_MINT_URL" ] || [ -z "$CDK_ITESTS_DIR" ]; then
+    if [ -z "$CDK_TEST_MINT_URL" ] || [ -z "$CDK_TEST_MINT_URL_2" ] || [ -z "$CDK_ITESTS_DIR" ]; then
         echo "ERROR: Failed to source environment variables from the .env file"
         exit 1
     fi
@@ -207,6 +209,30 @@ if [[ "$SUITE" != "onchain" ]]; then
             sleep 2  # Wait for 2 seconds before retrying
         fi
     done
+else
+    URL="$CDK_TEST_MINT_URL_2/v1/info"
+
+    TIMEOUT=100
+    START_TIME=$(date +%s)
+    while true; do
+        CURRENT_TIME=$(date +%s)
+        ELAPSED_TIME=$((CURRENT_TIME - START_TIME))
+
+        if [ $ELAPSED_TIME -ge $TIMEOUT ]; then
+            echo "Timeout of $TIMEOUT seconds reached. Exiting..."
+            exit 1
+        fi
+
+        HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}" $URL)
+
+        if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "Received 200 OK from $URL"
+            break
+        else
+            echo "Waiting for 200 OK response, current status: $HTTP_STATUS"
+            sleep 2
+        fi
+    done
 fi
 
 # Run cargo test
@@ -241,8 +267,6 @@ if [[ "$SUITE" == "onchain" ]]; then
         echo "onchain_regtest failed, exiting"
         exit 1
     fi
-    echo "Onchain tests passed successfully"
-    exit 0
 fi
 
 if [[ "$SUITE" == "all" ]]; then
@@ -349,7 +373,7 @@ if [[ "$SUITE" == "all" || "$SUITE" == "ln" ]]; then
     fi
 fi
 
-if [[ "$SUITE" == "all" || "$SUITE" == "onchain" ]]; then
+if [[ "$SUITE" == "all" ]]; then
     echo "Running onchain_regtest test with LDK mint"
     run_test onchain_regtest
     if [ $? -ne 0 ]; then
