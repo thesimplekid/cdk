@@ -22,6 +22,9 @@ use tracing::instrument;
 use crate::dhke::construct_proofs;
 use crate::nuts::{MintRequest, State};
 use crate::util::unix_time;
+use crate::wallet::blind_signature::{
+    validate_mint_response_signatures, SignatureAmountValidation,
+};
 use crate::wallet::issue::saga::compensation::ReleaseMintQuote;
 use crate::wallet::recovery::{RecoveryAction, RecoveryHelpers};
 use crate::wallet::saga::CompensatingAction;
@@ -295,9 +298,9 @@ impl Wallet {
             // Build signatures for locked quotes (NUT-20)
             let mut signatures: Vec<Option<String>> = Vec::new();
             for quote in &quote_infos {
-                if let Some(secret_key) = &quote.secret_key {
+                if let Some(secret_key) = self.mint_quote_signing_key(quote).await? {
                     let sig = batch_request
-                        .sign_quote(&quote.id, secret_key)
+                        .sign_quote(&quote.id, &secret_key)
                         .map_err(|e| Error::Custom(format!("NUT-20 signing failed: {}", e)))?;
                     signatures.push(Some(sig));
                 } else {
@@ -305,7 +308,7 @@ impl Wallet {
                 }
             }
 
-            let has_locked = quote_infos.iter().any(|q| q.secret_key.is_some());
+            let has_locked = signatures.iter().any(Option::is_some);
             let signatures_to_send = if has_locked { Some(signatures) } else { None };
             batch_request.signatures = signatures_to_send;
 
@@ -354,6 +357,14 @@ impl Wallet {
 
             let keys = self.load_keyset_keys(keyset_id).await?;
 
+            validate_mint_response_signatures(
+                self,
+                &mint_response.signatures,
+                blinded_messages.iter(),
+                SignatureAmountValidation::Exact,
+            )
+            .await?;
+
             let proofs = construct_proofs(
                 mint_response.signatures,
                 premint_secrets.rs(),
@@ -395,9 +406,9 @@ impl Wallet {
             signature: None,
         };
 
-        // Sign the request if the quote has a secret key (required for bolt12)
-        if let Some(ref secret_key) = quote.secret_key {
-            if let Err(e) = mint_request.sign(secret_key.clone()) {
+        // Sign the request if the quote has a signing key (required for bolt12)
+        if let Some(secret_key) = self.mint_quote_signing_key(&quote).await? {
+            if let Err(e) = mint_request.sign(secret_key) {
                 tracing::warn!(
                     "Issue saga {} - failed to sign mint request: {}, cannot replay",
                     saga_id,
@@ -458,6 +469,14 @@ impl Wallet {
         )?;
 
         let keys = self.load_keyset_keys(keyset_id).await?;
+
+        validate_mint_response_signatures(
+            self,
+            &mint_response.signatures,
+            blinded_messages.iter(),
+            SignatureAmountValidation::Exact,
+        )
+        .await?;
 
         let proofs = construct_proofs(
             mint_response.signatures,
