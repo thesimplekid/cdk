@@ -20,7 +20,7 @@ on:
 jobs:
   build-x86_64:
     name: "Build static binaries (x86_64)"
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
       contents: read
