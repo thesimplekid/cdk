@@ -11,10 +11,18 @@ on:
       static_artifact_run_id:
         description: 'Workflow run ID containing the static binary artifacts'
         required: true
+      registry:
+        description: 'Container registry to publish to'
+        required: false
+        default: docker.io
+      image_name:
+        description: 'Container image name, e.g. cashubtc/mintd or owner/mintd'
+        required: false
+        default: cashubtc/mintd
 
 env:
-  REGISTRY: docker.io
-  IMAGE_NAME: cashubtc/mintd
+  REGISTRY: ${{ inputs.registry || 'docker.io' }}
+  IMAGE_NAME: ${{ inputs.image_name || 'cashubtc/mintd' }}
 
 jobs:
   build:
@@ -43,11 +51,12 @@ jobs:
       packages: write
 
     steps:
-      - name: Login to Docker Hub
+      - name: Login to container registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY == 'ghcr.io' && github.actor || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ env.REGISTRY == 'ghcr.io' && github.token || secrets.DOCKERHUB_TOKEN }}
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -135,11 +144,12 @@ jobs:
             tag_suffix: "-ldk-node"
 
     steps:
-      - name: Login to Docker Hub
+      - name: Login to container registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY == 'ghcr.io' && github.actor || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ env.REGISTRY == 'ghcr.io' && github.token || secrets.DOCKERHUB_TOKEN }}
 
       - name: Determine tag
         id: tag

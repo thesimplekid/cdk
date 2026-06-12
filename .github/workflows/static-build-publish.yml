@@ -8,6 +8,14 @@ on:
       tag:
         description: 'Tag to build and publish'
         required: true
+      registry:
+        description: 'Container registry for the triggered Docker publish'
+        required: false
+        default: docker.io
+      image_name:
+        description: 'Container image name for the triggered Docker publish'
+        required: false
+        default: cashubtc/mintd
 
 jobs:
   build-x86_64:
@@ -139,9 +147,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
           INPUT_TAG: ${{ github.event.inputs.tag }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REGISTRY: ${{ github.event.inputs.registry || 'docker.io' }}
+          IMAGE_NAME: ${{ github.event.inputs.image_name || 'cashubtc/mintd' }}
+          WORKFLOW_REF: ${{ github.ref_name }}
         run: |
           TAG="${INPUT_TAG:-$RELEASE_TAG}"
           gh workflow run docker-publish.yml \
-            --ref "$TAG" \
+            --ref "$WORKFLOW_REF" \
             --field tag="$TAG" \
-            --field static_artifact_run_id="$GITHUB_RUN_ID"
+            --field static_artifact_run_id="$GITHUB_RUN_ID" \
+            --field registry="$REGISTRY" \
+            --field image_name="$IMAGE_NAME"
