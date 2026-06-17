@@ -7,7 +7,8 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use cdk_common::{Amount, Error, MeltQuoteState, MintQuoteState, NotificationPayload};
+use cdk_common::database::wallet::Database as WalletDatabase;
+use cdk_common::{database, Amount, Error, MeltQuoteState, MintQuoteState, NotificationPayload};
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt};
@@ -19,8 +20,85 @@ use crate::wallet::issue::{apply_accounting_mint_quote_update, apply_mint_quote_
 use crate::wallet::subscription::ActiveSubscription;
 use crate::{Wallet, WalletSubscription};
 
-type SubscribeReceived = (Option<MintEvent<String>>, Vec<ActiveSubscription>);
+type SubscribeReceived = (Option<MintEvent<String>>, Vec<ActiveSubscription>, bool);
 type PaymentValue = (String, Option<Amount>);
+
+async fn apply_mint_quote_notification(
+    localstore: &Arc<dyn WalletDatabase<database::Error> + Send + Sync>,
+    event: &MintEvent<String>,
+) -> bool {
+    match event.inner() {
+        NotificationPayload::MintQuoteBolt11Response(info) => {
+            let quote_id = info.quote.clone();
+            if let Ok(Some(mut quote)) = localstore.get_mint_quote(&quote_id).await {
+                let applied = apply_mint_quote_response(
+                    &mut quote,
+                    &cdk_common::MintQuoteResponse::Bolt11(info.clone()),
+                );
+                if applied {
+                    if let Err(e) = localstore.add_mint_quote(quote).await {
+                        tracing::warn!("Failed to update quote state: {}", e);
+                    }
+                }
+                return applied;
+            }
+        }
+        NotificationPayload::MintQuoteBolt12Response(info) => {
+            let quote_id = info.quote.clone();
+            if let Ok(Some(mut quote)) = localstore.get_mint_quote(&quote_id).await {
+                let applied = apply_accounting_mint_quote_update(
+                    &mut quote,
+                    info.amount_paid,
+                    info.amount_issued,
+                    info.updated_at,
+                );
+                if applied {
+                    if let Err(e) = localstore.add_mint_quote(quote).await {
+                        tracing::warn!("Failed to update quote state: {}", e);
+                    }
+                }
+                return applied;
+            }
+        }
+        NotificationPayload::MintQuoteOnchainResponse(info) => {
+            let quote_id = info.quote.clone();
+            if let Ok(Some(mut quote)) = localstore.get_mint_quote(&quote_id).await {
+                let applied = apply_accounting_mint_quote_update(
+                    &mut quote,
+                    info.amount_paid,
+                    info.amount_issued,
+                    info.updated_at,
+                );
+                if applied {
+                    if let Err(e) = localstore.add_mint_quote(quote).await {
+                        tracing::warn!("Failed to update quote state: {}", e);
+                    }
+                }
+                return applied;
+            }
+        }
+        NotificationPayload::CustomMintQuoteResponse(_, info) => {
+            let quote_id = info.quote.clone();
+            if let Ok(Some(mut quote)) = localstore.get_mint_quote(&quote_id).await {
+                let applied = apply_accounting_mint_quote_update(
+                    &mut quote,
+                    info.amount_paid,
+                    info.amount_issued,
+                    info.updated_at,
+                );
+                if applied {
+                    if let Err(e) = localstore.add_mint_quote(quote).await {
+                        tracing::warn!("Failed to update quote state: {}", e);
+                    }
+                }
+                return applied;
+            }
+        }
+        _ => (),
+    }
+
+    true
+}
 
 /// PaymentWaiter
 #[allow(missing_debug_implementations)]
@@ -141,79 +219,20 @@ impl<'a> PaymentStream<'a> {
                 if let Some(res) = futures.next().await {
                     drop(futures);
 
+                    let mut should_emit = true;
                     if let Some(event) = &res {
-                        match event.inner() {
-                            NotificationPayload::MintQuoteBolt11Response(info) => {
-                                let quote_id = info.quote.clone();
-                                if let Ok(Some(mut quote)) =
-                                    localstore.get_mint_quote(&quote_id).await
-                                {
-                                    apply_mint_quote_response(
-                                        &mut quote,
-                                        &cdk_common::MintQuoteResponse::Bolt11(info.clone()),
-                                    );
-                                    if let Err(e) = localstore.add_mint_quote(quote).await {
-                                        tracing::warn!("Failed to update quote state: {}", e);
-                                    }
-                                }
-                            }
-                            NotificationPayload::MintQuoteBolt12Response(info) => {
-                                let quote_id = info.quote.clone();
-                                if let Ok(Some(mut quote)) =
-                                    localstore.get_mint_quote(&quote_id).await
-                                {
-                                    apply_accounting_mint_quote_update(
-                                        &mut quote,
-                                        info.amount_paid,
-                                        info.amount_issued,
-                                        info.updated_at,
-                                    );
-                                    if let Err(e) = localstore.add_mint_quote(quote).await {
-                                        tracing::warn!("Failed to update quote state: {}", e);
-                                    }
-                                }
-                            }
-                            NotificationPayload::MintQuoteOnchainResponse(info) => {
-                                let quote_id = info.quote.clone();
-                                if let Ok(Some(mut quote)) =
-                                    localstore.get_mint_quote(&quote_id).await
-                                {
-                                    apply_accounting_mint_quote_update(
-                                        &mut quote,
-                                        info.amount_paid,
-                                        info.amount_issued,
-                                        info.updated_at,
-                                    );
-                                    if let Err(e) = localstore.add_mint_quote(quote).await {
-                                        tracing::warn!("Failed to update quote state: {}", e);
-                                    }
-                                }
-                            }
-                            NotificationPayload::CustomMintQuoteResponse(_, info) => {
-                                let quote_id = info.quote.clone();
-                                if let Ok(Some(mut quote)) =
-                                    localstore.get_mint_quote(&quote_id).await
-                                {
-                                    apply_accounting_mint_quote_update(
-                                        &mut quote,
-                                        info.amount_paid,
-                                        info.amount_issued,
-                                        info.updated_at,
-                                    );
-                                    if let Err(e) = localstore.add_mint_quote(quote).await {
-                                        tracing::warn!("Failed to update quote state: {}", e);
-                                    }
-                                }
-                            }
-                            _ => (),
-                        }
+                        should_emit = apply_mint_quote_notification(&localstore, event).await;
                     }
 
-                    return (res, subscription_receiver);
+                    return (
+                        if should_emit { res } else { None },
+                        subscription_receiver,
+                        false,
+                    );
                 }
 
                 drop(futures);
-                (None, subscription_receiver)
+                (None, subscription_receiver, true)
             })
         });
 
@@ -222,17 +241,18 @@ impl<'a> PaymentStream<'a> {
                 self.subscription_receiver_future = Some(receiver);
                 Poll::Pending
             }
-            Poll::Ready((notification, subscription)) => {
+            Poll::Ready((notification, subscription, is_complete)) => {
                 tracing::debug!("Receive payment notification {:?}", notification);
                 // This future is now fulfilled, put the active_subscription again back to object. Next time next().await is called,
                 // the future will be created in subscription_receiver_future.
                 self.active_subscription = Some(subscription);
                 self.cancellation_future = None; // resets timeout
                 match notification {
-                    None => {
+                    None if is_complete => {
                         self.is_finalized = true;
                         Poll::Ready(None)
                     }
+                    None => self.poll_event(cx),
                     Some(info) => {
                         match info.into_inner() {
                             NotificationPayload::MintQuoteBolt11Response(info)
@@ -317,11 +337,13 @@ impl Stream for PaymentStream<'_> {
 #[cfg(test)]
 mod tests {
     use std::pin::Pin;
+    use std::str::FromStr;
     use std::task::{Context, Poll, Waker};
 
+    use cdk_common::mint_url::MintUrl;
     use cdk_common::{
         Amount, CurrencyUnit, MintQuoteBolt12Response, MintQuoteCustomResponse,
-        MintQuoteOnchainResponse, NotificationPayload,
+        MintQuoteOnchainResponse, NotificationPayload, PaymentMethod,
     };
     use futures::Stream;
 
@@ -330,6 +352,7 @@ mod tests {
     use crate::nuts::SecretKey;
     use crate::wallet::subscription::ActiveSubscription;
     use crate::wallet::test_utils::{create_test_db, create_test_wallet};
+    use crate::wallet::MintQuote;
 
     #[tokio::test]
     async fn mint_quote_notification_underflow_does_not_panic() {
@@ -385,7 +408,7 @@ mod tests {
             stream.filters = None;
             stream.subscription_receiver_future = Some(Box::pin(async move {
                 let subscriptions: Vec<ActiveSubscription> = Vec::new();
-                (Some(event), subscriptions)
+                (Some(event), subscriptions, false)
             }));
 
             let mut cx = Context::from_waker(Waker::noop());
@@ -399,5 +422,64 @@ mod tests {
                 Poll::Ready(None)
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn stale_mint_quote_notification_is_not_emitted() {
+        let db = create_test_db().await;
+        let wallet = create_test_wallet(db.clone()).await;
+        let pubkey = SecretKey::generate().public_key();
+        let quote_id = "custom_quote".to_string();
+        let mut quote = MintQuote::new(
+            quote_id.clone(),
+            MintUrl::from_str("https://mint.example.com").expect("valid mint URL"),
+            PaymentMethod::Custom("custom".to_string()),
+            Some(Amount::from(200)),
+            CurrencyUnit::Sat,
+            "test_request".to_string(),
+            1_700_000_000,
+            None,
+        );
+        quote.amount_paid = Amount::from(150);
+        quote.amount_issued = Amount::from(100);
+        quote.updated_at = 10;
+        quote.update_state_from_amounts();
+        db.add_mint_quote(quote)
+            .await
+            .expect("mint quote should be stored");
+        assert!(
+            db.get_mint_quote(&quote_id)
+                .await
+                .expect("mint quote lookup should succeed")
+                .is_some(),
+            "mint quote should be readable before polling"
+        );
+
+        let event = MintEvent::new(NotificationPayload::CustomMintQuoteResponse(
+            "custom".to_string(),
+            MintQuoteCustomResponse::<String> {
+                quote: quote_id.clone(),
+                request: "test_request".to_string(),
+                amount: None,
+                amount_paid: Amount::from(120),
+                amount_issued: Amount::from(100),
+                updated_at: 11,
+                unit: Some(CurrencyUnit::Sat),
+                expiry: None,
+                pubkey: Some(pubkey),
+                extra: serde_json::Value::Null,
+            },
+        ));
+
+        assert!(!super::apply_mint_quote_notification(&wallet.localstore, &event).await);
+
+        let stored_quote = db
+            .get_mint_quote(&quote_id)
+            .await
+            .expect("mint quote lookup should succeed")
+            .expect("mint quote should exist");
+        assert_eq!(stored_quote.amount_paid, Amount::from(150));
+        assert_eq!(stored_quote.amount_issued, Amount::from(100));
+        assert_eq!(stored_quote.updated_at, 10);
     }
 }

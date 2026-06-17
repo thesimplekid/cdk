@@ -20,7 +20,7 @@ use crate::{Amount, Error, Wallet};
 pub(crate) fn apply_mint_quote_response(
     quote: &mut MintQuote,
     response: &MintQuoteResponse<String>,
-) {
+) -> bool {
     match response {
         MintQuoteResponse::Bolt11(response) => {
             let state =
@@ -59,38 +59,33 @@ pub(crate) fn apply_mint_quote_response(
             };
 
             if is_stale_mint_quote_update(quote, response.updated_at, amount_paid, amount_issued) {
-                return;
+                return false;
             }
 
             quote.state = state;
             quote.amount_paid = amount_paid;
             quote.amount_issued = amount_issued;
             quote.updated_at = quote.updated_at.max(response.updated_at);
+            true
         }
-        MintQuoteResponse::Bolt12(response) => {
-            apply_accounting_mint_quote_update(
-                quote,
-                response.amount_paid,
-                response.amount_issued,
-                response.updated_at,
-            );
-        }
-        MintQuoteResponse::Onchain(response) => {
-            apply_accounting_mint_quote_update(
-                quote,
-                response.amount_paid,
-                response.amount_issued,
-                response.updated_at,
-            );
-        }
-        MintQuoteResponse::Custom { response, .. } => {
-            apply_accounting_mint_quote_update(
-                quote,
-                response.amount_paid,
-                response.amount_issued,
-                response.updated_at,
-            );
-        }
+        MintQuoteResponse::Bolt12(response) => apply_accounting_mint_quote_update(
+            quote,
+            response.amount_paid,
+            response.amount_issued,
+            response.updated_at,
+        ),
+        MintQuoteResponse::Onchain(response) => apply_accounting_mint_quote_update(
+            quote,
+            response.amount_paid,
+            response.amount_issued,
+            response.updated_at,
+        ),
+        MintQuoteResponse::Custom { response, .. } => apply_accounting_mint_quote_update(
+            quote,
+            response.amount_paid,
+            response.amount_issued,
+            response.updated_at,
+        ),
     }
 }
 
@@ -99,15 +94,16 @@ pub(crate) fn apply_accounting_mint_quote_update(
     amount_paid: Amount,
     amount_issued: Amount,
     updated_at: u64,
-) {
+) -> bool {
     if is_stale_mint_quote_update(quote, updated_at, amount_paid, amount_issued) {
-        return;
+        return false;
     }
 
     quote.amount_paid = amount_paid;
     quote.amount_issued = amount_issued;
     quote.updated_at = quote.updated_at.max(updated_at);
     quote.update_state_from_amounts();
+    true
 }
 
 fn is_stale_mint_quote_update(
@@ -731,7 +727,7 @@ mod tests {
         quote.update_state_from_amounts();
 
         let stale_response = custom_mint_quote_response(Amount::from(200), Amount::from(20), 9);
-        apply_mint_quote_response(&mut quote, &stale_response);
+        assert!(!apply_mint_quote_response(&mut quote, &stale_response));
 
         assert_eq!(quote.amount_paid, Amount::from(100));
         assert_eq!(quote.amount_issued, Amount::from(20));
@@ -739,14 +735,14 @@ mod tests {
 
         let decreasing_response =
             custom_mint_quote_response(Amount::from(90), Amount::from(20), 11);
-        apply_mint_quote_response(&mut quote, &decreasing_response);
+        assert!(!apply_mint_quote_response(&mut quote, &decreasing_response));
 
         assert_eq!(quote.amount_paid, Amount::from(100));
         assert_eq!(quote.amount_issued, Amount::from(20));
         assert_eq!(quote.updated_at, 10);
 
         let fresh_response = custom_mint_quote_response(Amount::from(150), Amount::from(30), 12);
-        apply_mint_quote_response(&mut quote, &fresh_response);
+        assert!(apply_mint_quote_response(&mut quote, &fresh_response));
 
         assert_eq!(quote.amount_paid, Amount::from(150));
         assert_eq!(quote.amount_issued, Amount::from(30));
