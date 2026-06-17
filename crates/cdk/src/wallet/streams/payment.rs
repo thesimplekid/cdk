@@ -15,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::RecvFuture;
 use crate::event::MintEvent;
+use crate::wallet::issue::{apply_accounting_mint_quote_update, apply_mint_quote_response};
 use crate::wallet::subscription::ActiveSubscription;
 use crate::{Wallet, WalletSubscription};
 
@@ -147,8 +148,10 @@ impl<'a> PaymentStream<'a> {
                                 if let Ok(Some(mut quote)) =
                                     localstore.get_mint_quote(&quote_id).await
                                 {
-                                    quote.state = info.state;
-                                    quote.amount_paid = info.amount.unwrap_or(Amount::ZERO);
+                                    apply_mint_quote_response(
+                                        &mut quote,
+                                        &cdk_common::MintQuoteResponse::Bolt11(info.clone()),
+                                    );
                                     if let Err(e) = localstore.add_mint_quote(quote).await {
                                         tracing::warn!("Failed to update quote state: {}", e);
                                     }
@@ -159,8 +162,12 @@ impl<'a> PaymentStream<'a> {
                                 if let Ok(Some(mut quote)) =
                                     localstore.get_mint_quote(&quote_id).await
                                 {
-                                    quote.amount_paid = info.amount_paid;
-                                    quote.amount_issued = info.amount_issued;
+                                    apply_accounting_mint_quote_update(
+                                        &mut quote,
+                                        info.amount_paid,
+                                        info.amount_issued,
+                                        info.updated_at,
+                                    );
                                     if let Err(e) = localstore.add_mint_quote(quote).await {
                                         tracing::warn!("Failed to update quote state: {}", e);
                                     }
@@ -171,8 +178,12 @@ impl<'a> PaymentStream<'a> {
                                 if let Ok(Some(mut quote)) =
                                     localstore.get_mint_quote(&quote_id).await
                                 {
-                                    quote.amount_paid = info.amount_paid;
-                                    quote.amount_issued = info.amount_issued;
+                                    apply_accounting_mint_quote_update(
+                                        &mut quote,
+                                        info.amount_paid,
+                                        info.amount_issued,
+                                        info.updated_at,
+                                    );
                                     if let Err(e) = localstore.add_mint_quote(quote).await {
                                         tracing::warn!("Failed to update quote state: {}", e);
                                     }
@@ -183,8 +194,12 @@ impl<'a> PaymentStream<'a> {
                                 if let Ok(Some(mut quote)) =
                                     localstore.get_mint_quote(&quote_id).await
                                 {
-                                    quote.amount_paid = info.amount_paid;
-                                    quote.amount_issued = info.amount_issued;
+                                    apply_accounting_mint_quote_update(
+                                        &mut quote,
+                                        info.amount_paid,
+                                        info.amount_issued,
+                                        info.updated_at,
+                                    );
                                     if let Err(e) = localstore.add_mint_quote(quote).await {
                                         tracing::warn!("Failed to update quote state: {}", e);
                                     }
@@ -333,6 +348,7 @@ mod tests {
                     pubkey,
                     amount_paid: Amount::from(50u64),
                     amount_issued: Amount::from(100u64),
+                    updated_at: 0,
                 },
             )),
             MintEvent::new(NotificationPayload::MintQuoteOnchainResponse(
@@ -344,6 +360,7 @@ mod tests {
                     pubkey,
                     amount_paid: Amount::from(50u64),
                     amount_issued: Amount::from(100u64),
+                    updated_at: 0,
                 },
             )),
             MintEvent::new(NotificationPayload::CustomMintQuoteResponse(
@@ -354,6 +371,7 @@ mod tests {
                     amount: None,
                     amount_paid: Amount::from(50u64),
                     amount_issued: Amount::from(100u64),
+                    updated_at: 0,
                     unit: Some(CurrencyUnit::Sat),
                     expiry: None,
                     pubkey: Some(pubkey),
