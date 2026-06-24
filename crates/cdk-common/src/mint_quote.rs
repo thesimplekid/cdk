@@ -179,10 +179,11 @@ pub fn quote_state_from_amounts(amount_paid: Amount, amount_issued: Amount) -> Q
         return QuoteState::Unpaid;
     }
 
-    match amount_paid.cmp(&amount_issued) {
-        std::cmp::Ordering::Less | std::cmp::Ordering::Equal => QuoteState::Issued,
-        std::cmp::Ordering::Greater => QuoteState::Paid,
+    if amount_paid <= amount_issued {
+        return QuoteState::Issued;
     }
+
+    QuoteState::Paid
 }
 
 #[cfg(test)]
@@ -219,6 +220,10 @@ mod tests {
         );
         assert_eq!(
             custom_response(Amount::from(100), Amount::from(100)).state(),
+            Some(QuoteState::Issued)
+        );
+        assert_eq!(
+            custom_response(Amount::from(50), Amount::from(100)).state(),
             Some(QuoteState::Issued)
         );
     }
