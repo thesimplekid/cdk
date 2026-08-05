@@ -25,20 +25,6 @@ impl BdkStorage {
             .await
             .map_err(Error::from)?;
 
-        let active = tx
-            .kv_read(
-                BDK_NAMESPACE,
-                SEND_INTENT_QUOTE_ID_NAMESPACE,
-                &intent.quote_id,
-            )
-            .await
-            .map_err(Error::from)?;
-
-        if active.is_some() {
-            tx.rollback().await.map_err(Error::from)?;
-            return Err(Error::DuplicateQuoteId(intent.quote_id.clone()));
-        }
-
         let finalized = tx
             .kv_read(
                 BDK_NAMESPACE,
@@ -53,20 +39,27 @@ impl BdkStorage {
             return Err(Error::DuplicateQuoteId(intent.quote_id.clone()));
         }
 
+        let claimed = tx
+            .kv_write_if_absent(
+                BDK_NAMESPACE,
+                SEND_INTENT_QUOTE_ID_NAMESPACE,
+                &intent.quote_id,
+                intent.intent_id.to_string().as_bytes(),
+            )
+            .await
+            .map_err(Error::from)?;
+
+        if !claimed {
+            tx.rollback().await.map_err(Error::from)?;
+            return Err(Error::DuplicateQuoteId(intent.quote_id.clone()));
+        }
+
         let serialized = serde_json::to_vec(intent)?;
         tx.kv_write(
             BDK_NAMESPACE,
             SEND_INTENT_NAMESPACE,
             &intent.intent_id.to_string(),
             &serialized,
-        )
-        .await
-        .map_err(Error::from)?;
-        tx.kv_write(
-            BDK_NAMESPACE,
-            SEND_INTENT_QUOTE_ID_NAMESPACE,
-            &intent.quote_id,
-            intent.intent_id.to_string().as_bytes(),
         )
         .await
         .map_err(Error::from)?;
@@ -109,6 +102,41 @@ impl BdkStorage {
             .await
             .map_err(Error::from)?;
 
+        let active = match active {
+            Some(intent_id_bytes) => Some(intent_id_bytes),
+            None => {
+                let claimed = tx
+                    .kv_write_if_absent(
+                        BDK_NAMESPACE,
+                        SEND_INTENT_QUOTE_ID_NAMESPACE,
+                        &intent.quote_id,
+                        intent.intent_id.to_string().as_bytes(),
+                    )
+                    .await
+                    .map_err(Error::from)?;
+
+                if claimed {
+                    None
+                } else {
+                    Some(
+                        tx.kv_read(
+                            BDK_NAMESPACE,
+                            SEND_INTENT_QUOTE_ID_NAMESPACE,
+                            &intent.quote_id,
+                        )
+                        .await
+                        .map_err(Error::from)?
+                        .ok_or_else(|| {
+                            Error::Wallet(
+                                "Quote-id claim disappeared during send-intent creation"
+                                    .to_string(),
+                            )
+                        })?,
+                    )
+                }
+            }
+        };
+
         let record = if let Some(intent_id_bytes) = active {
             let intent_id_str = std::str::from_utf8(&intent_id_bytes)
                 .map_err(|e| Error::Wallet(format!("Invalid quote-id index entry: {}", e)))?;
@@ -137,14 +165,6 @@ impl BdkStorage {
                 state: intent.state.clone(),
             }
         } else {
-            tx.kv_write(
-                BDK_NAMESPACE,
-                SEND_INTENT_QUOTE_ID_NAMESPACE,
-                &intent.quote_id,
-                intent.intent_id.to_string().as_bytes(),
-            )
-            .await
-            .map_err(Error::from)?;
             intent.clone()
         };
 
@@ -380,13 +400,8 @@ impl BdkStorage {
         tx.kv_remove(BDK_NAMESPACE, SEND_INTENT_NAMESPACE, &intent_id.to_string())
             .await
             .map_err(Error::from)?;
-        tx.kv_remove(
-            BDK_NAMESPACE,
-            SEND_INTENT_QUOTE_ID_NAMESPACE,
-            &intent.quote_id,
-        )
-        .await
-        .map_err(Error::from)?;
+        // Keep the quote-id claim permanently. Removing it here would reopen
+        // a create-vs-finalize race and allow the quote to be paid again.
         tx.commit().await.map_err(Error::from)?;
         Ok(())
     }

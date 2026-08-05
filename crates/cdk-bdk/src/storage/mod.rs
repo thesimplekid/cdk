@@ -23,7 +23,9 @@ pub const BDK_NAMESPACE: &str = "bdk";
 /// Secondary namespace for send intents
 pub const SEND_INTENT_NAMESPACE: &str = "send_intent";
 
-/// Secondary namespace for send intent quote id index
+/// Durable send-intent quote-id claim (quote_id -> intent_id).
+///
+/// Claims remain after finalization so a quote ID can never be reused.
 pub const SEND_INTENT_QUOTE_ID_NAMESPACE: &str = "send_intent_quote_id";
 
 /// Secondary namespace for send batches
@@ -43,7 +45,9 @@ pub const RECEIVE_ADDRESS_QUOTE_ID_NAMESPACE: &str = "receive_address_quote_id";
 /// Secondary namespace for receive intents (keyed by intent_id)
 pub const RECEIVE_INTENT_NAMESPACE: &str = "receive_intent";
 
-/// Secondary namespace for receive intent outpoint index (outpoint -> intent_id)
+/// Durable receive-intent outpoint claim (outpoint -> intent_id).
+///
+/// Claims remain after finalization so an outpoint can never be processed twice.
 pub const RECEIVE_INTENT_OUTPOINT_NAMESPACE: &str = "receive_intent_outpoint";
 
 /// Secondary namespace for finalized (confirmed) receive intents.
@@ -543,6 +547,110 @@ mod tests {
         assert!(matches!(err, Error::DuplicateQuoteId(_)));
     }
 
+    /// Exercises the production Postgres concurrency behavior behind
+    /// send-quote and receive-outpoint deduplication.
+    #[tokio::test]
+    #[ignore = "requires a Postgres instance configured by CDK_MINTD_DATABASE_URL or PG_DB_URL"]
+    async fn test_postgres_atomic_send_and_receive_dedup() {
+        use tokio::sync::Barrier;
+
+        use crate::receive::receive_intent::record::{ReceiveIntentRecord, ReceiveIntentState};
+
+        const WRITERS: usize = 16;
+
+        let db_url = std::env::var("CDK_MINTD_DATABASE_URL")
+            .or_else(|_| std::env::var("PG_DB_URL"))
+            .unwrap_or_else(|_| {
+                "host=localhost user=cdk_user password=cdk_password dbname=cdk_mint port=5432"
+                    .to_string()
+            });
+        let schema = format!("test_bdk_atomic_{}", Uuid::new_v4().simple());
+        let db = cdk_postgres::MintPgDatabase::new(format!("{db_url} schema={schema}").as_str())
+            .await
+            .expect("postgres database");
+        let storage = BdkStorage::new(Arc::new(db));
+
+        let quote_id = Uuid::new_v4().to_string();
+        let barrier = Arc::new(Barrier::new(WRITERS));
+        let mut tasks = Vec::with_capacity(WRITERS);
+        for writer in 0..WRITERS {
+            let storage = storage.clone();
+            let barrier = Arc::clone(&barrier);
+            let quote_id = quote_id.clone();
+            tasks.push(tokio::spawn(async move {
+                let intent = SendIntentRecord {
+                    intent_id: Uuid::new_v4(),
+                    quote_id,
+                    address: format!("bcrt1qwriter{writer}"),
+                    amount_sat: 50_000,
+                    max_fee_amount_sat: 1_000,
+                    tier: PaymentTier::Immediate,
+                    metadata: PaymentMetadata::default(),
+                    state: SendIntentState::Pending {
+                        created_at: 1_700_000_000,
+                    },
+                };
+                barrier.wait().await;
+                storage.create_or_retry_failed_send_intent(&intent).await
+            }));
+        }
+
+        let mut send_successes = 0;
+        for task in tasks {
+            match task.await.expect("send writer task") {
+                Ok(_) => send_successes += 1,
+                Err(Error::DuplicateQuoteId(_)) => {}
+                Err(_) => panic!("unexpected send-intent creation error"),
+            }
+        }
+        assert_eq!(send_successes, 1);
+        let send_intents = storage.get_all_send_intents().await.expect("send intents");
+        assert_eq!(send_intents.len(), 1);
+        assert_eq!(send_intents[0].quote_id, quote_id);
+
+        let outpoint = format!("{}:0", Uuid::new_v4().simple());
+        let barrier = Arc::new(Barrier::new(WRITERS));
+        let mut tasks = Vec::with_capacity(WRITERS);
+        for writer in 0..WRITERS {
+            let storage = storage.clone();
+            let barrier = Arc::clone(&barrier);
+            let outpoint = outpoint.clone();
+            tasks.push(tokio::spawn(async move {
+                let intent = ReceiveIntentRecord {
+                    intent_id: Uuid::new_v4(),
+                    quote_id: Uuid::new_v4().to_string(),
+                    state: ReceiveIntentState::Detected {
+                        address: format!("bcrt1qreceiver{writer}"),
+                        txid: "shared_txid".to_string(),
+                        outpoint,
+                        amount_sat: 50_000,
+                        block_height: 100,
+                        created_at: 1_700_000_000,
+                    },
+                };
+                barrier.wait().await;
+                storage.create_receive_intent_if_absent(&intent).await
+            }));
+        }
+
+        let mut receive_successes = 0;
+        for task in tasks {
+            if task
+                .await
+                .expect("receive writer task")
+                .expect("receive create")
+            {
+                receive_successes += 1;
+            }
+        }
+        assert_eq!(receive_successes, 1);
+        let receive_intents = storage
+            .get_all_receive_intents()
+            .await
+            .expect("receive intents");
+        assert_eq!(receive_intents.len(), 1);
+    }
+
     /// Regression test for un-rolled-back transaction on the active-duplicate
     /// path. Prior to the fix, `create_send_intent_if_absent` returned
     /// `DuplicateQuoteId` without rolling back the open transaction, violating
@@ -638,7 +746,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_finalize_send_intent_removes_quote_id_index() {
+    async fn test_finalize_send_intent_retains_quote_id_claim() {
         let storage = test_storage().await;
         let intent = make_pending_intent(Uuid::new_v4());
         let intent_id = intent.intent_id;
@@ -674,6 +782,12 @@ mod tests {
             .get_finalized_intent(&intent_id)
             .await
             .expect("get tombstone")
+            .is_some());
+        assert!(storage
+            .kv_store
+            .kv_read(BDK_NAMESPACE, SEND_INTENT_QUOTE_ID_NAMESPACE, &quote_id)
+            .await
+            .expect("get durable quote-id claim")
             .is_some());
 
         // A new intent for the SAME quote ID should NOT be allowed
@@ -1681,6 +1795,16 @@ mod tests {
             .expect("tombstone should exist");
         assert_eq!(fetched_tombstone.intent_id, intent_id);
         assert_eq!(fetched_tombstone.amount_sat, 50_000);
+        assert!(storage
+            .kv_store
+            .kv_read(
+                BDK_NAMESPACE,
+                RECEIVE_INTENT_OUTPOINT_NAMESPACE,
+                "txid_abc-0",
+            )
+            .await
+            .expect("get durable outpoint claim")
+            .is_some());
 
         // Outpoint should NOT be freed (cannot create a new intent with same outpoint)
         let intent2 = ReceiveIntentRecord {

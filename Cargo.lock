@@ -1281,6 +1281,7 @@ dependencies = [
  "bdk_esplora",
  "bdk_wallet 3.1.0",
  "cdk-common",
+ "cdk-postgres",
  "cdk-sqlite",
  "futures",
  "serde",

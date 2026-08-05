@@ -89,6 +89,41 @@ where
     Ok(())
 }
 
+/// Atomically write a value in a transaction if its key is absent.
+#[cfg(feature = "mint")]
+pub(crate) async fn kv_write_if_absent_in_transaction<RM>(
+    conn: &ConnectionWithTransaction<RM::Connection, PooledResource<RM>>,
+    primary_namespace: &str,
+    secondary_namespace: &str,
+    key: &str,
+    value: &[u8],
+) -> Result<bool, Error>
+where
+    RM: DatabasePool,
+{
+    validate_kvstore_params(primary_namespace, secondary_namespace, Some(key))?;
+
+    let current_time = unix_time();
+    let rows_affected = query(
+        r#"
+        INSERT INTO kv_store
+        (primary_namespace, secondary_namespace, key, value, created_time, updated_time)
+        VALUES (:primary_namespace, :secondary_namespace, :key, :value, :created_time, :updated_time)
+        ON CONFLICT(primary_namespace, secondary_namespace, key) DO NOTHING
+        "#,
+    )?
+    .bind("primary_namespace", primary_namespace.to_owned())
+    .bind("secondary_namespace", secondary_namespace.to_owned())
+    .bind("key", key.to_owned())
+    .bind("value", value.to_vec())
+    .bind("created_time", current_time as i64)
+    .bind("updated_time", current_time as i64)
+    .execute(conn)
+    .await?;
+
+    Ok(rows_affected == 1)
+}
+
 /// Generic implementation of kv_remove for transactions
 #[cfg(feature = "mint")]
 pub(crate) async fn kv_remove_in_transaction<RM>(

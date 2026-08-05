@@ -34,5 +34,6 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+cdk-postgres.workspace = true
 cdk-sqlite = { workspace = true }
 tempfile = "3"

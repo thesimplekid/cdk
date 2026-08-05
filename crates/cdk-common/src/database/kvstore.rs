@@ -87,6 +87,27 @@ pub trait KVStoreTransaction<Error>: DbTransactionFinalizer<Err = Error> {
         value: &[u8],
     ) -> Result<(), Error>;
 
+    /// Write a value only when the key does not already exist.
+    ///
+    /// The existence check and insert must be atomic across concurrent
+    /// transactions. Returns `true` when the value was inserted and `false`
+    /// when the key already existed.
+    async fn kv_write_if_absent(
+        &mut self,
+        _primary_namespace: &str,
+        _secondary_namespace: &str,
+        _key: &str,
+        _value: &[u8],
+    ) -> Result<bool, Error>
+    where
+        Error: From<super::Error>,
+    {
+        Err(super::Error::Internal(
+            "Atomic KV insert-if-absent is not supported by this backend".to_string(),
+        )
+        .into())
+    }
+
     /// Remove value from key-value store
     async fn kv_remove(
         &mut self,

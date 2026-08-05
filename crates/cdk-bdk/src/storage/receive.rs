@@ -85,22 +85,9 @@ impl BdkStorage {
             .await
             .map_err(Error::from)?;
 
-        // Check outpoint index for duplicates (active and finalized)
+        // Check the finalized index for records created before outpoint claims
+        // became durable across finalization.
         let outpoint_key = outpoint_to_key(&outpoint);
-        let active = tx
-            .kv_read(
-                BDK_NAMESPACE,
-                RECEIVE_INTENT_OUTPOINT_NAMESPACE,
-                &outpoint_key,
-            )
-            .await
-            .map_err(Error::from)?;
-
-        if active.is_some() {
-            tx.rollback().await.map_err(Error::from)?;
-            return Ok(false);
-        }
-
         let finalized = tx
             .kv_read(
                 BDK_NAMESPACE,
@@ -115,20 +102,27 @@ impl BdkStorage {
             return Ok(false);
         }
 
+        let claimed = tx
+            .kv_write_if_absent(
+                BDK_NAMESPACE,
+                RECEIVE_INTENT_OUTPOINT_NAMESPACE,
+                &outpoint_key,
+                intent.intent_id.to_string().as_bytes(),
+            )
+            .await
+            .map_err(Error::from)?;
+
+        if !claimed {
+            tx.rollback().await.map_err(Error::from)?;
+            return Ok(false);
+        }
+
         let serialized = serde_json::to_vec(intent)?;
         tx.kv_write(
             BDK_NAMESPACE,
             RECEIVE_INTENT_NAMESPACE,
             &intent.intent_id.to_string(),
             &serialized,
-        )
-        .await
-        .map_err(Error::from)?;
-        tx.kv_write(
-            BDK_NAMESPACE,
-            RECEIVE_INTENT_OUTPOINT_NAMESPACE,
-            &outpoint_key,
-            intent.intent_id.to_string().as_bytes(),
         )
         .await
         .map_err(Error::from)?;
@@ -249,13 +243,8 @@ impl BdkStorage {
         )
         .await
         .map_err(Error::from)?;
-        tx.kv_remove(
-            BDK_NAMESPACE,
-            RECEIVE_INTENT_OUTPOINT_NAMESPACE,
-            &outpoint_key,
-        )
-        .await
-        .map_err(Error::from)?;
+        // Keep the outpoint claim permanently. Removing it here would reopen
+        // a create-vs-finalize race and allow the UTXO to be processed again.
         tx.commit().await.map_err(Error::from)?;
         Ok(())
     }

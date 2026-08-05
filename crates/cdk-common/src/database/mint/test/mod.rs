@@ -106,6 +106,41 @@ where
         assert_eq!(other_keys, vec!["key3"]);
     }
 
+    // Test atomic insert-if-absent semantics.
+    {
+        let mut tx = Database::begin_transaction(&db).await.unwrap();
+        let inserted = tx
+            .kv_write_if_absent(
+                "test_namespace",
+                "insert_if_absent",
+                "claimed_key",
+                b"first_value",
+            )
+            .await
+            .unwrap();
+        assert!(inserted);
+        tx.commit().await.unwrap();
+
+        let mut tx = Database::begin_transaction(&db).await.unwrap();
+        let inserted = tx
+            .kv_write_if_absent(
+                "test_namespace",
+                "insert_if_absent",
+                "claimed_key",
+                b"second_value",
+            )
+            .await
+            .unwrap();
+        assert!(!inserted);
+        tx.commit().await.unwrap();
+
+        let value = db
+            .kv_read("test_namespace", "insert_if_absent", "claimed_key")
+            .await
+            .unwrap();
+        assert_eq!(value, Some(b"first_value".to_vec()));
+    }
+
     // Test update and remove operations
     {
         let mut tx = Database::begin_transaction(&db).await.unwrap();
