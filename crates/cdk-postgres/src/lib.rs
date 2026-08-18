@@ -406,7 +406,7 @@ pub async fn new_wallet_pg_database(conn_str: &str) -> Result<WalletPgDatabase, 
 
 #[cfg(test)]
 mod test {
-    use cdk_common::{mint_db_test, wallet_db_test};
+    use cdk_common::{mint_db_test, wallet_db_test, QuoteId};
 
     use super::*;
 
@@ -426,6 +426,210 @@ mod test {
     }
 
     mint_db_test!(provide_mint_db);
+
+    #[tokio::test]
+    async fn melt_quote_last_checked_throttles_status_checks() {
+        use cdk_common::database::{MintDatabase, MintQuotesDatabase};
+        use cdk_common::mint::{MeltPaymentRequest, MeltQuote};
+        use cdk_common::{Amount, CurrencyUnit, PaymentMethod};
+
+        let test_id = format!("test_melt_last_checked_{}", uuid::Uuid::new_v4());
+        let db = provide_mint_db(test_id).await;
+
+        let quote = MeltQuote::new(
+            None,
+            MeltPaymentRequest::Bolt11 {
+                bolt11: "lnbc330n1p5d85skpp5344v3ktclujsjl3h09wgsfm7zytumr7h7zhrl857f5w8nv0a52zqdqqcqzzsxqyz5vqrzjqvueefmrckfdwyyu39m0lf24sqzcr9vcrmxrvgfn6empxz7phrjxvrttncqq0lcqqyqqqqlgqqqqqqgq2qsp5j3rrg8kvpemqxtf86j8tjm90wq77c7ende4e5qmrerq4xsg02vhq9qxpqysgqjltywgyk6uc5qcgwh8xnzmawl2tjlhz8d28tgp3yx8xwtz76x0jqkfh6mmq70hervjxs0keun7ur0spldgll29l0dnz3md50d65sfqqqwrwpsu".parse().expect("valid bolt11"),
+            },
+            CurrencyUnit::Sat,
+            Amount::new(1000, CurrencyUnit::Sat),
+            Amount::new(10, CurrencyUnit::Sat),
+            1_000_000_000,
+            None,
+            None,
+            PaymentMethod::Known(cdk_common::nut00::KnownMethod::Bolt11),
+            None,
+            None,
+        );
+        let quote_id = quote.id.clone();
+        let mut tx = MintDatabase::begin_transaction(&db).await.expect("tx");
+        tx.add_melt_quote(quote).await.expect("add melt quote");
+        tx.commit().await.expect("commit");
+
+        // First claim succeeds and persists the timestamp.
+        assert!(db
+            .try_update_melt_quote_last_checked(&quote_id, 1_000, 10)
+            .await
+            .expect("first claim"));
+        let stored = db
+            .get_melt_quote(&quote_id)
+            .await
+            .expect("get")
+            .expect("quote exists");
+        assert_eq!(stored.last_checked(), 1_000);
+
+        // A second claim inside the window is denied.
+        assert!(!db
+            .try_update_melt_quote_last_checked(&quote_id, 1_005, 10)
+            .await
+            .expect("second claim within window"));
+
+        // A claim after the window succeeds and advances the timestamp.
+        assert!(db
+            .try_update_melt_quote_last_checked(&quote_id, 1_011, 10)
+            .await
+            .expect("claim after window"));
+        let stored = db
+            .get_melt_quote(&quote_id)
+            .await
+            .expect("get")
+            .expect("quote exists");
+        assert_eq!(stored.last_checked(), 1_011);
+    }
+
+    #[tokio::test]
+    async fn mint_pool_accepts_single_connection_configuration() {
+        use cdk_common::database::MintDatabase;
+
+        let test_id = format!("test_single_connection_pool_{}", uuid::Uuid::new_v4());
+        let db_url = std::env::var("CDK_MINTD_DATABASE_URL")
+            .or_else(|_| std::env::var("PG_DB_URL"))
+            .unwrap_or(
+                "host=localhost user=cdk_user password=cdk_password dbname=cdk_mint port=5432"
+                    .to_owned(),
+            );
+        let config = PgConfig::new(
+            &format!("{db_url} schema={test_id}"),
+            None,
+            Some(1),
+            Some(10),
+        );
+
+        let db = MintPgDatabase::new(config)
+            .await
+            .expect("single-connection mint pool should remain supported");
+        let dispatch = MintDatabase::begin_dispatch_transaction(&db)
+            .await
+            .expect("dispatch transaction");
+        dispatch.rollback().await.expect("dispatch rollback");
+        let regular = MintDatabase::begin_transaction(&db)
+            .await
+            .expect("regular transaction");
+        regular.rollback().await.expect("regular rollback");
+    }
+
+    #[tokio::test]
+    async fn try_quote_lock_reports_contended_without_waiting() {
+        use std::sync::Arc;
+
+        use cdk_common::database::mint::QuoteLockAttempt;
+        use cdk_common::database::MintDatabase;
+
+        let test_id = format!("test_try_quote_lock_{}", uuid::Uuid::new_v4());
+        let db = Arc::new(provide_mint_db(test_id).await);
+        let quote_id = QuoteId::new();
+
+        let mut holder = MintDatabase::begin_transaction(&*db).await.expect("tx");
+        assert!(holder
+            .lock_quotes(std::slice::from_ref(&quote_id))
+            .await
+            .expect("lock"));
+
+        let mut waiter = MintDatabase::begin_transaction(&*db).await.expect("tx");
+        assert_eq!(
+            waiter
+                .try_lock_quotes(std::slice::from_ref(&quote_id))
+                .await
+                .expect("try lock"),
+            QuoteLockAttempt::Contended
+        );
+        waiter.rollback().await.expect("rollback");
+
+        holder.commit().await.expect("commit");
+
+        let mut free = MintDatabase::begin_transaction(&*db).await.expect("tx");
+        assert_eq!(
+            free.try_lock_quotes(std::slice::from_ref(&quote_id))
+                .await
+                .expect("try lock"),
+            QuoteLockAttempt::Acquired
+        );
+        free.rollback().await.expect("rollback");
+    }
+
+    #[tokio::test]
+    async fn dispatch_transaction_preserves_regular_pool_capacity() {
+        use std::time::Duration;
+
+        use cdk_common::database::MintDatabase;
+
+        let test_id = format!("test_dispatch_pool_{}", uuid::Uuid::new_v4());
+        let db_url = std::env::var("CDK_MINTD_DATABASE_URL")
+            .or_else(|_| std::env::var("PG_DB_URL"))
+            .unwrap_or(
+                "host=localhost user=cdk_user password=cdk_password dbname=cdk_mint port=5432"
+                    .to_owned(),
+            );
+        let config = PgConfig::new(
+            &format!("{db_url} schema={test_id}"),
+            None,
+            Some(2),
+            Some(10),
+        );
+        let db = MintPgDatabase::new(config).await.expect("database");
+
+        let dispatch = MintDatabase::begin_dispatch_transaction(&db)
+            .await
+            .expect("dispatch transaction");
+        let regular =
+            tokio::time::timeout(Duration::from_secs(5), MintDatabase::begin_transaction(&db))
+                .await
+                .expect("regular pool capacity must remain available")
+                .expect("regular transaction");
+
+        regular.rollback().await.expect("regular rollback");
+        dispatch.rollback().await.expect("dispatch rollback");
+    }
+
+    #[tokio::test]
+    async fn quote_lock_batch_excludes_concurrent_transaction() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use cdk_common::database::MintDatabase;
+
+        let test_id = format!("test_quote_lock_batch_{}", uuid::Uuid::new_v4());
+        let db = Arc::new(provide_mint_db(test_id).await);
+        let first = QuoteId::new();
+        let second = QuoteId::new();
+
+        let mut holder = MintDatabase::begin_transaction(&*db).await.expect("tx");
+        holder
+            .lock_quotes(&[first.clone(), second.clone()])
+            .await
+            .expect("lock");
+
+        let waiter = tokio::spawn({
+            let db = db.clone();
+            async move {
+                let mut tx = MintDatabase::begin_transaction(&*db).await.expect("tx");
+                tx.lock_quotes(&[second, first]).await.expect("lock");
+                tx.commit().await.expect("commit");
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !waiter.is_finished(),
+            "reversed quote batch did not wait for the holder"
+        );
+
+        holder.commit().await.expect("commit");
+        tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .expect("reversed quote batch remained blocked")
+            .expect("waiter task");
+    }
 
     #[tokio::test]
     async fn kvstore_compare_and_swap() {
