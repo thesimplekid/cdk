@@ -1,0 +1,21 @@
+rust:
+  directory: ../..
+  manifestPath: crates/cashu-ffi/Cargo.toml
+bindings:
+  cpp: cpp/generated
+  ts: src/generated
+turboModule:
+  cpp: cpp
+  ts: src/native
+  entrypoint: src/native/index.ts
+android:
+  packageName: org.cashu.cdk.crypto
+  targets:
+    - arm64-v8a
+    - x86_64
+  apiLevel: 24
+  useSharedLibrary: true
+ios:
+  targets:
+    - aarch64-apple-ios
+    - aarch64-apple-ios-sim

@@ -44,6 +44,9 @@ The core `cdk-ffi` crate (`crates/cdk-ffi/`) contains:
 Each language wrapper crate is a single `pub use cdk_ffi::*;` re-export with its
 own `uniffi.toml` controlling language-specific code generation.
 
+The React Native crypto package is separate: it wraps `crates/cashu-ffi/`
+and plugs into a cashu-ts wallet. It does not expose the full CDK Wallet API.
+
 ## Current targets
 
 | Language | Directory | Status | Build | Test |
@@ -52,6 +55,7 @@ own `uniffi.toml` controlling language-specific code generation.
 | **Swift** | `bindings/swift/` | Active | CI workflow | `just test-swift` |
 | **Kotlin** | `bindings/kotlin/` | Active | `just binding-kotlin` | `just test-kotlin` |
 | **Go** | `bindings/go/` | Active | `just binding-go` | `just test-go` |
+| **React Native crypto** | [`bindings/react-native/`](react-native/README.md) | Source integration; device validation pending | `just binding-react-native` | `npm test` |
 
 ### Dart
 
@@ -76,7 +80,7 @@ own `uniffi.toml` controlling language-specific code generation.
 | Language | Status | Notes |
 |----------|--------|-------|
 | **Python** | Configured | UniFFI config exists in `crates/cdk-ffi/uniffi.toml` |
-| **React Native** | Planned | — |
+| **React Native full wallet** | Planned | The existing React Native package exposes cashu-ts output crypto only. |
 
 Python already has UniFFI configuration in the core FFI crate. Adding a new
 language binding involves creating a `bindings/<lang>/` directory with a thin
@@ -108,7 +112,7 @@ just test-go         # Run tests
 ### All bindings at once
 
 The recommended way to release all FFI bindings is through the unified workflow,
-which triggers Dart, Go, Kotlin, and Swift builds in parallel:
+which triggers Dart, Go, Kotlin, Swift, and React Native builds in parallel:
 
 ```bash
 just ffi-release-all 0.17.0
@@ -116,8 +120,8 @@ just ffi-release-all 0.17.0
 
 This runs the **FFI - Publish All Bindings** GitHub Actions workflow
 (`.github/workflows/ffi-publish-all.yml`), which:
-- Calls all four language publish workflows as reusable workflows
-- Creates the corresponding releases in the separate binding repositories
+- Calls all five binding publish workflows as reusable workflows
+- Creates releases in the separate binding repositories and publishes the React Native npm package
 
 The `release` just recipe calls `ffi-release-all` automatically after publishing
 Rust crates.
@@ -180,6 +184,9 @@ just ffi-release-swift 0.17.0
 
 # Go (separate workflow)
 just ffi-release-go 0.17.0
+
+# React Native (npm)
+just ffi-release-react-native 0.18.0
 ```
 
 ### Prerequisites
@@ -190,6 +197,8 @@ just ffi-release-go 0.17.0
   and reject `cdk_ref` values that differ from `release_tag`
 - The `FFI_DEPLOY_KEY` GitHub secret must have write access to `cdk-dart`,
   `cdk-go`, `cdk-kotlin`, and `cdk-swift` repos
+- React Native publishing requires an `NPM_TOKEN` secret with publish access to
+  `@cashu/cdk-react-native`; tagged prereleases use npm's `next` tag
 - Kotlin publishing requires the `SONATYPE_USERNAME`, `SONATYPE_PASSWORD`,
   `SIGNING_KEY`, and `SIGNING_PASSWORD` GitHub secrets
 - The `CDK_DART_REPO`, `CDK_GO_REPO`, `CDK_KOTLIN_REPO`, and `CDK_SWIFT_REPO` GitHub

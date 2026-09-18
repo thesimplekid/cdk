@@ -1,0 +1,65 @@
+{
+  "name": "@cashu/cdk-react-native",
+  "version": "0.18.0",
+  "description": "Rust-backed cashu-ts output creation for React Native",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cashubtc/cdk.git",
+    "directory": "bindings/react-native"
+  },
+  "author": "CDK Developers",
+  "homepage": "https://github.com/cashubtc/cdk",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "react-native": "./src/index.ts",
+  "source": "./src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "cpp",
+    "android",
+    "ios",
+    "*.podspec",
+    "react-native.config.js",
+    "README.md",
+    "*.xcframework"
+  ],
+  "scripts": {
+    "build": "npm run generate && npm run compile",
+    "typecheck": "tsc --noEmit",
+    "test": "bash scripts/test.sh",
+    "generate": "bash scripts/generate.sh",
+    "build:android": "ubrn build android --config ubrn.config.yaml --and-generate --release && node scripts/fix-generated.cjs",
+    "build:ios": "ubrn build ios --config ubrn.config.yaml --and-generate --release && node scripts/fix-generated.cjs",
+    "format:check": "prettier --check src/creator.ts src/index.ts test scripts/*.cjs package.json tsconfig*.json",
+    "prepack": "npm run build",
+    "compile": "tsc -p tsconfig.build.json"
+  },
+  "peerDependencies": {
+    "@cashu/cashu-ts": "4.10.2",
+    "react": ">=18",
+    "react-native": ">=0.76"
+  },
+  "dependencies": {
+    "uniffi-bindgen-react-native": "0.30.0-1"
+  },
+  "devDependencies": {
+    "@cashu/cashu-ts": "4.10.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "react": "19.1.0",
+    "react-native": "0.81.0",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "prettier": "3.6.2"
+  },
+  "codegenConfig": {
+    "name": "CdkReactNativeSpec",
+    "type": "modules",
+    "jsSrcsDir": "src/native",
+    "android": {
+      "javaPackageName": "org.cashu.cdk.crypto"
+    }
+  }
+}

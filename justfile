@@ -134,7 +134,8 @@ ci-cache-build:
     '.#checks.x86_64-linux.workspace-clippy-all-targets' \
     '.#dart-bindings' \
     '.#kotlin-bindings' \
-    '.#go-bindings'
+    '.#go-bindings' \
+    '.#react-native-bindings'
 
 # Push the locally built CI cache warmup targets to Cachix.
 ci-cache-push:
@@ -148,6 +149,7 @@ ci-cache-push:
     '.#dart-bindings' \
     '.#kotlin-bindings' \
     '.#go-bindings' \
+    '.#react-native-bindings' \
     | jq -r '.[].outputs | to_entries[].value' \
     | cachix push cashudevkit
 
@@ -829,7 +831,7 @@ release *ARGS:
     echo
   done
 
-  # Trigger all FFI binding releases (Dart, Kotlin, Swift, Go)
+  # Trigger all FFI binding releases (Dart, Kotlin, Swift, Go, React Native)
   echo "📦 Triggering all FFI binding releases for version $VERSION..."
   just ffi-release-all $VERSION
 
@@ -1132,7 +1134,7 @@ ffi-test-live-python:
   echo "🧪 Running live Python FFI tests..."
   python3 crates/cdk-ffi/tests/test_live_async_onchain_melt.py
 
-# Trigger all FFI binding releases (Dart, Kotlin, Swift, Go)
+# Trigger all FFI binding releases (Dart, Kotlin, Swift, Go, React Native)
 ffi-release-all VERSION:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -1318,3 +1320,15 @@ test-swift:
   else
     DYLD_LIBRARY_PATH="$LIB_DIR" swift test
   fi
+
+# Build the generated React Native package and run its conformance checks with Nix.
+binding-react-native:
+  nix build -L .#react-native-bindings
+
+# Build the Android libraries for the React Native package (x86_64 Linux).
+binding-react-native-android:
+  nix build -L .#react-native-android
+
+# Trigger a tagged React Native npm release. Requires the repository NPM_TOKEN secret.
+ffi-release-react-native VERSION:
+  gh workflow run react-native-publish.yml --repo cashubtc/cdk --ref "v{{VERSION}}" -f release_tag="v{{VERSION}}"

@@ -215,6 +215,30 @@
           ./fuzz/src
         ];
 
+        # React Native dependencies and generated sources must never enter Cargo
+        # source snapshots, including path flakes in JJ working copies.
+        reactNativeSource = lib.fileset.unions [
+          ./bindings/react-native/package.json
+          ./bindings/react-native/package-lock.json
+          ./bindings/react-native/.gitignore
+          ./bindings/react-native/.npmignore
+          ./bindings/react-native/README.md
+          ./bindings/react-native/react-native.config.js
+          ./bindings/react-native/tsconfig.json
+          ./bindings/react-native/tsconfig.build.json
+          ./bindings/react-native/ubrn.config.yaml
+          ./bindings/react-native/src/creator.ts
+          ./bindings/react-native/src/index.ts
+          ./bindings/react-native/scripts
+          ./bindings/react-native/test
+          ./bindings/react-native/android/gradle.properties
+          ./bindings/react-native/android/proguard-rules.pro
+          ./bindings/react-native/android/src/main/AndroidManifestNew.xml
+        ];
+        bindingsSource = lib.fileset.union
+          (lib.fileset.difference ./bindings ./bindings/react-native)
+          reactNativeSource;
+
         # Source for crane builds - uses lib.fileset for efficient filtering
         # This is much faster than nix-gitignore when large directories (like target/) exist
         # because it uses a whitelist approach rather than scanning everything first
@@ -230,7 +254,7 @@
             ./.cargo
             ./crates
             fuzzSrc
-            ./bindings
+            bindingsSource
           ]
         );
 
@@ -262,7 +286,7 @@
               ./.cargo
               ./crates
               fuzzSrc
-              ./bindings
+              bindingsSource
             ]
           );
         };
@@ -596,6 +620,11 @@
         # ========================================
         # Language binding derivations (cached by Cachix)
         # ========================================
+
+        reactNative = import ./nix/react-native.nix {
+          inherit pkgs lib craneLib src cargoVendorDir version nixpkgs system;
+          stableToolchain = stable_toolchain;
+        };
 
         # Dart FFI bindings: builds cdk-ffi-dart cdylib + generates Dart source
         dartBindings = craneLib.mkCargoDerivation (
@@ -1464,6 +1493,12 @@
           dart-bindings = dartBindings;
           kotlin-bindings = kotlinBindings;
           go-bindings = goBindings;
+          cashu-ffi = reactNative.ffi;
+          uniffi-bindgen-react-native = reactNative.generator;
+          react-native-bindings = reactNative.bindings;
+        }
+        // lib.optionalAttrs (system == "x86_64-linux") {
+          react-native-android = reactNative.android;
         }
         # Static build deps (Linux only)
         // lib.optionalAttrs (muslTarget != null) {
@@ -1516,6 +1551,7 @@
             exampleChecks
         ));
         checks =
+          { react-native-bindings = reactNative.bindings; } //
           # Generate clippy + test checks from clippyAndTestChecks attrset
           (builtins.mapAttrs (name: args: mkClippyAndTest name args) clippyAndTestChecks)
           # Generate MSRV build checks (prefixed with msrv-)
@@ -1860,6 +1896,7 @@
               kotlin-build
               kotlin-publish
               ;
+            react-native = reactNative.shell;
             default = stable;
           };
       }

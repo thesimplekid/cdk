@@ -1,0 +1,6 @@
+# Generated sources and native binaries are intentionally shipped. This file
+# overrides .gitignore for npm; package.json's files list defines the public files.
+android/build/
+android/.cxx/
+node_modules/
+ios/build/

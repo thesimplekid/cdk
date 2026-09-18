@@ -1,0 +1,19 @@
+node_modules/
+lib/
+android/build/
+android/.cxx/
+android/src/main/jniLibs/
+ios/build/
+*.xcframework/
+
+# Recreated by the pinned UniFFI generator during npm run build.
+/src/generated/
+/src/native/
+/cpp/
+/ios/
+/CdkReactNative.podspec
+/android/build.gradle
+/android/CMakeLists.txt
+/android/cpp-adapter.cpp
+/android/src/main/AndroidManifest.xml
+/android/src/main/java/

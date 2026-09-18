@@ -1,0 +1,58 @@
+name: cashu-ts native crypto
+
+on:
+  pull_request:
+    paths:
+      - 'crates/cashu/**'
+      - 'crates/cashu-ffi/**'
+      - 'bindings/react-native/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/react-native.nix'
+      - 'nix/uniffi-bindgen-react-native.Cargo.lock'
+      - '.github/workflows/react-native-publish.yml'
+      - '.github/workflows/cashu-ts-crypto.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bindings/react-native/package-lock.json
+      - run: cargo test -p cashu-ffi --locked
+      - run: cargo clippy -p cashu-ffi --all-targets --locked -- -D warnings
+      - run: cargo fmt -p cashu-ffi -- --check
+      - run: npm ci
+        working-directory: bindings/react-native
+      - name: Build from source and generate bindings
+        run: npm run build
+        working-directory: bindings/react-native
+      - run: npm run format:check && npm run typecheck && npm test
+        working-directory: bindings/react-native
+      - name: Validate React Native codegen for both platforms
+        run: node node_modules/react-native/scripts/generate-codegen-artifacts.js -p . -o "$RUNNER_TEMP/cdk-codegen" -t all
+        working-directory: bindings/react-native
+
+  nix-bindings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - run: nix build -L .#react-native-bindings --no-link

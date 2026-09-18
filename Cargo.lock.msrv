@@ -1170,6 +1170,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cashu-ffi"
+version = "0.18.0"
+dependencies = [
+ "bitcoin",
+ "cashu",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uniffi",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

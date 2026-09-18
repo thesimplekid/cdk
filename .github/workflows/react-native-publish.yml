@@ -1,0 +1,196 @@
+name: "React Native - Publish npm package"
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing CDK version tag, e.g. v0.18.0"
+        required: true
+        type: string
+      cdk_ref:
+        description: "Must match release_tag when provided"
+        required: false
+        type: string
+      cdk_version:
+        description: "Must match the Cargo workspace version when provided"
+        required: false
+        type: string
+      prerelease:
+        description: "Publish under npm's next tag"
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      cdk_ref:
+        default: ''
+        type: string
+      cdk_version:
+        default: ''
+        type: string
+      prerelease:
+        default: false
+        type: boolean
+    secrets:
+      NPM_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: react-native-publish-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+      npm_tag: ${{ steps.source.outputs.npm_tag }}
+    steps:
+      - name: Validate release inputs
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CDK_REF: ${{ inputs.cdk_ref }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+          [[ -z "$CDK_REF" || "$CDK_REF" == "$RELEASE_TAG" ]] || exit 1
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.release_tag }}
+          persist-credentials: false
+      - name: Resolve immutable source and package version
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CDK_VERSION: ${{ inputs.cdk_version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess, tomllib
+          with open('Cargo.toml', 'rb') as source:
+              version = tomllib.load(source)['workspace']['package']['version']
+          if os.environ['RELEASE_TAG'] != f'v{version}':
+              raise SystemExit('Release tag must match the Cargo workspace version')
+          if os.environ['CDK_VERSION'] not in ('', version):
+              raise SystemExit('cdk_version must match the Cargo workspace version')
+          tag = 'next' if '-' in version or os.environ['PRERELEASE'] == 'true' else 'latest'
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'sha={sha}\nversion={version}\nnpm_tag={tag}\n')
+          PY
+
+  release-ci:
+    needs: source
+    uses: ./.github/workflows/release-ci.yml
+    with:
+      ref: ${{ needs.source.outputs.sha }}
+
+  nix-artifacts:
+    needs: [source, release-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - name: Build generated package and Android libraries
+        run: |
+          nix build -L .#react-native-bindings --out-link result-bindings
+          nix build -L .#react-native-android --out-link result-android
+          mkdir -p release-package
+          cp -R result-bindings/package/. release-package/
+          chmod -R u+w release-package
+          cp -R result-android/android/. release-package/android/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: react-native-package-android
+          path: release-package/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  ios:
+    needs: [source, release-ci]
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - name: Build iOS device and simulator XCFramework
+        run: nix develop .#react-native -c bash bindings/react-native/scripts/build-ios.sh "$RUNNER_TEMP/ios-artifacts"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: react-native-ios
+          path: ${{ runner.temp }}/ios-artifacts/
+          if-no-files-found: error
+
+  package:
+    needs: [source, nix-artifacts, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8
+        with:
+          name: react-native-package-android
+          path: release-package/
+      - uses: actions/download-artifact@v8
+        with:
+          name: react-native-ios
+          path: release-package/
+      - name: Pack and verify the complete package
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          mkdir -p dist
+          # Use the already tested Nix build; do not regenerate at packaging time.
+          (cd release-package && npm pack --ignore-scripts --pack-destination ../dist)
+          python3 bindings/react-native/scripts/verify-package.py \
+            "dist/cashu-cdk-react-native-${RELEASE_VERSION}.tgz" --version "$RELEASE_VERSION"
+          (cd dist && sha256sum -- *.tgz > SHA256SUMS)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: react-native-npm-release
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: [source, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: react-native-npm-release
+          path: dist/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - name: Publish verified tarball
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          NPM_TAG: ${{ needs.source.outputs.npm_tag }}
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          npm publish "cashu-cdk-react-native-${RELEASE_VERSION}.tgz" \
+            --access public --provenance --tag "$NPM_TAG" --ignore-scripts
