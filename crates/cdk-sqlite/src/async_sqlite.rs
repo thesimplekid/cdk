@@ -1,9 +1,15 @@
 //! Simple SQLite
+use std::convert::identity;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use cdk_common::database::Error;
 use cdk_sql_common::database::{DatabaseConnector, DatabaseExecutor, DatabaseTransaction};
-use cdk_sql_common::run_db_operation_sync;
+use cdk_sql_common::run_db_operation;
 use cdk_sql_common::stmt::{query, Column, SqlPart, Statement};
+use cdk_sql_common::value::Value;
 use rusqlite::{ffi, CachedStatement, Connection, Error as SqliteError, ErrorCode};
+use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 
 use crate::common::{from_sqlite, to_sqlite};
@@ -11,37 +17,113 @@ use crate::common::{from_sqlite, to_sqlite};
 /// Async Sqlite wrapper
 #[derive(Debug)]
 pub struct AsyncSqlite {
-    inner: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
+    stale: Arc<AtomicBool>,
 }
 
 impl AsyncSqlite {
-    pub fn new(inner: Connection) -> Self {
+    /// Shares the connection behind an async mutex so each statement can run on a blocking thread,
+    /// since every rusqlite call blocks.
+    ///
+    /// The blocking work is one task per statement rather than a parked worker loop, because
+    /// dropping a runtime waits for every blocking task it owns and a loop parked until its last
+    /// handle drops would never return.
+    pub fn new(conn: Connection, stale: Arc<AtomicBool>) -> Self {
         Self {
-            inner: inner.into(),
+            conn: Arc::new(Mutex::new(conn)),
+            stale,
         }
+    }
+
+    /// Runs `f` on a blocking thread holding the connection, timed as `info`, marking the
+    /// connection stale when `f` panics and leaves sqlite's state ambiguous.
+    ///
+    /// The guard is taken before the task is spawned because tokio's mutex is FIFO, which is what
+    /// keeps a rollback queued behind the cancelled statement it has to undo.
+    async fn call<T, F>(&self, info: &str, f: F) -> Result<T, Error>
+    where
+        F: FnOnce(&Connection) -> Result<T, Error> + Send + 'static,
+        T: Send + 'static,
+    {
+        run_db_operation(
+            info,
+            async {
+                let handle = Handle::try_current()
+                    .map_err(|_| Error::Internal("sqlite calls need a tokio runtime".to_owned()))?;
+                let guard = Arc::clone(&self.conn).lock_owned().await;
+
+                handle
+                    .spawn_blocking(move || f(&guard))
+                    .await
+                    .map_err(|err| {
+                        if err.is_panic() {
+                            self.stale.store(true, Ordering::SeqCst);
+                            Error::Internal("sqlite call panicked".to_owned())
+                        } else {
+                            Error::Internal("sqlite call was cancelled".to_owned())
+                        }
+                    })?
+            },
+            identity,
+        )
+        .await
     }
 }
-impl AsyncSqlite {
-    fn get_stmt<'a>(
-        &self,
-        conn: &'a Connection,
-        statement: Statement,
-    ) -> Result<(String, CachedStatement<'a>), Error> {
-        let (sql, placeholder_values) = statement.to_sql()?;
 
-        let new_sql = sql.trim().trim_end_matches("FOR UPDATE");
+/// `FOR UPDATE` is stripped because SQLite has no row locks and the shared SQL is written for
+/// Postgres.
+fn prepare<'a>(
+    conn: &'a Connection,
+    sql: &str,
+    placeholder_values: Vec<Value>,
+) -> Result<CachedStatement<'a>, Error> {
+    let mut stmt = conn
+        .prepare_cached(sql.trim().trim_end_matches("FOR UPDATE"))
+        .map_err(|e| Error::Database(Box::new(e)))?;
 
-        let mut stmt = conn
-            .prepare_cached(new_sql)
+    for (i, value) in placeholder_values.into_iter().enumerate() {
+        stmt.raw_bind_parameter(i + 1, to_sqlite(value))
             .map_err(|e| Error::Database(Box::new(e)))?;
-
-        for (i, value) in placeholder_values.into_iter().enumerate() {
-            stmt.raw_bind_parameter(i + 1, to_sqlite(value))
-                .map_err(|e| Error::Database(Box::new(e)))?;
-        }
-
-        Ok((sql, stmt))
     }
+
+    Ok(stmt)
+}
+
+fn first_row(stmt: &mut CachedStatement<'_>) -> Result<Option<Vec<Column>>, SqliteError> {
+    let columns = stmt.column_count();
+    let mut rows = stmt.raw_query();
+
+    rows.next()?
+        .map(|row| {
+            (0..columns)
+                .map(|i| row.get(i).map(from_sqlite))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+}
+
+fn all_rows(stmt: &mut CachedStatement<'_>) -> Result<Vec<Vec<Column>>, SqliteError> {
+    let columns = stmt.column_count();
+    let mut rows = stmt.raw_query();
+    let mut results = vec![];
+
+    while let Some(row) = rows.next()? {
+        results.push(
+            (0..columns)
+                .map(|i| row.get(i).map(from_sqlite))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    }
+
+    Ok(results)
+}
+
+fn first_column(stmt: &mut CachedStatement<'_>) -> Result<Option<Column>, SqliteError> {
+    let mut rows = stmt.raw_query();
+
+    rows.next()?
+        .map(|row| row.get(0usize).map(from_sqlite))
+        .transpose()
 }
 
 #[inline(always)]
@@ -86,12 +168,16 @@ impl DatabaseTransaction<AsyncSqlite> for SQLiteTransactionHandler {
         Ok(())
     }
 
-    /// Consumes the transaction rolling back all changes
+    /// Consumes the transaction rolling back all changes, skipping the ROLLBACK when nothing was
+    /// begun, since the resulting error would discard the connection and with it an in-memory
+    /// database.
     async fn rollback(conn: &mut AsyncSqlite) -> Result<(), Error> {
-        // Nothing to roll back, e.g. when BEGIN never ran. Treating this as an
-        // error would discard the connection, which for in-memory databases
-        // discards the database itself.
-        if conn.inner.get_mut().is_autocommit() {
+        if conn
+            .call("is_autocommit", |inner: &Connection| {
+                Ok(inner.is_autocommit())
+            })
+            .await?
+        {
             return Ok(());
         }
         query("ROLLBACK")?.execute(conn).await?;
@@ -110,83 +196,46 @@ impl DatabaseExecutor for AsyncSqlite {
     }
 
     async fn execute(&self, statement: Statement) -> Result<usize, Error> {
-        let conn = self.inner.lock().await;
+        let (sql, placeholder_values) = statement.to_sql()?;
+        let prepared: Arc<str> = sql.as_str().into();
 
-        let (sql, mut stmt) = self
-            .get_stmt(&conn, statement)
-            .map_err(|e| Error::Database(Box::new(e)))?;
-
-        run_db_operation_sync(&sql, || stmt.raw_execute(), to_sqlite_error)
+        self.call(&sql, move |conn| {
+            prepare(conn, &prepared, placeholder_values)?
+                .raw_execute()
+                .map_err(to_sqlite_error)
+        })
+        .await
     }
 
     async fn fetch_one(&self, statement: Statement) -> Result<Option<Vec<Column>>, Error> {
-        let conn = self.inner.lock().await;
-        let (sql, mut stmt) = self
-            .get_stmt(&conn, statement)
-            .map_err(|e| Error::Database(Box::new(e)))?;
+        let (sql, placeholder_values) = statement.to_sql()?;
+        let prepared: Arc<str> = sql.as_str().into();
 
-        run_db_operation_sync(
-            &sql,
-            || {
-                let columns = stmt.column_count();
-
-                let mut rows = stmt.raw_query();
-                rows.next()?
-                    .map(|row| {
-                        (0..columns)
-                            .map(|i| row.get(i).map(from_sqlite))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .transpose()
-            },
-            to_sqlite_error,
-        )
+        self.call(&sql, move |conn| {
+            first_row(&mut prepare(conn, &prepared, placeholder_values)?).map_err(to_sqlite_error)
+        })
+        .await
     }
 
     async fn fetch_all(&self, statement: Statement) -> Result<Vec<Vec<Column>>, Error> {
-        let conn = self.inner.lock().await;
-        let (sql, mut stmt) = self
-            .get_stmt(&conn, statement)
-            .map_err(|e| Error::Database(Box::new(e)))?;
+        let (sql, placeholder_values) = statement.to_sql()?;
+        let prepared: Arc<str> = sql.as_str().into();
 
-        let columns = stmt.column_count();
-
-        run_db_operation_sync(
-            &sql,
-            || {
-                let mut rows = stmt.raw_query();
-                let mut results = vec![];
-
-                while let Some(row) = rows.next()? {
-                    results.push(
-                        (0..columns)
-                            .map(|i| row.get(i).map(from_sqlite))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    )
-                }
-
-                Ok(results)
-            },
-            to_sqlite_error,
-        )
+        self.call(&sql, move |conn| {
+            all_rows(&mut prepare(conn, &prepared, placeholder_values)?).map_err(to_sqlite_error)
+        })
+        .await
     }
 
     async fn pluck(&self, statement: Statement) -> Result<Option<Column>, Error> {
-        let conn = self.inner.lock().await;
-        let (sql, mut stmt) = self
-            .get_stmt(&conn, statement)
-            .map_err(|e| Error::Database(Box::new(e)))?;
+        let (sql, placeholder_values) = statement.to_sql()?;
+        let prepared: Arc<str> = sql.as_str().into();
 
-        run_db_operation_sync(
-            &sql,
-            || {
-                let mut rows = stmt.raw_query();
-                rows.next()?
-                    .map(|row| row.get(0usize).map(from_sqlite))
-                    .transpose()
-            },
-            to_sqlite_error,
-        )
+        self.call(&sql, move |conn| {
+            first_column(&mut prepare(conn, &prepared, placeholder_values)?)
+                .map_err(to_sqlite_error)
+        })
+        .await
     }
 
     async fn batch(&self, mut statement: Statement) -> Result<(), Error> {
@@ -208,9 +257,12 @@ impl DatabaseExecutor for AsyncSqlite {
                 unreachable!()
             }
         };
-        let conn = self.inner.lock().await;
+        let batch = Arc::clone(&sql);
 
-        run_db_operation_sync(&sql, || conn.execute_batch(&sql), to_sqlite_error)
+        self.call(&sql, move |conn| {
+            conn.execute_batch(&batch).map_err(to_sqlite_error)
+        })
+        .await
     }
 }
 
@@ -232,7 +284,10 @@ mod tests {
     use crate::common::{Config, SqliteConnectionManager};
 
     fn in_memory() -> AsyncSqlite {
-        AsyncSqlite::new(Connection::open_in_memory().expect("in memory database"))
+        AsyncSqlite::new(
+            Connection::open_in_memory().expect("in memory database"),
+            Arc::new(AtomicBool::new(false)),
+        )
     }
 
     fn temp_path(prefix: &str) -> String {
@@ -400,6 +455,52 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_panicking_call_marks_the_connection_stale() {
+        let stale = Arc::new(AtomicBool::new(false));
+        let db = AsyncSqlite::new(
+            Connection::open_in_memory().expect("in memory database"),
+            stale.clone(),
+        );
+
+        assert!(matches!(
+            db.call("panic", |_: &Connection| -> Result<(), Error> {
+                panic!("the call dies here")
+            })
+            .await,
+            Err(Error::Internal(_))
+        ));
+
+        assert!(
+            stale.load(Ordering::SeqCst),
+            "a panicking call left the connection usable"
+        );
+    }
+
+    /// A panicking call must take its connection out of the pool rather than leave one with
+    /// ambiguous sqlite state to be handed out again, asserted against an in-memory database
+    /// because discarding its only connection is the one case the pool refuses to replace.
+    #[tokio::test]
+    async fn a_panicking_call_takes_its_connection_out_of_the_pool() {
+        let pool = Pool::<SqliteConnectionManager>::new(config_for(":memory:"));
+
+        {
+            let conn = pool.get().await.expect("connection");
+            assert!(matches!(
+                conn.call("panic", |_: &Connection| -> Result<(), Error> {
+                    panic!("the call dies here")
+                })
+                .await,
+                Err(Error::Internal(_))
+            ));
+        }
+
+        assert!(
+            pool.get().await.is_err(),
+            "the panicked connection was handed out again"
+        );
+    }
+
     /// A cancelled statement keeps running to completion, so the next statement must queue behind
     /// it instead of overtaking it, which is what stops a rollback preceding the write it undoes.
     #[tokio::test]
@@ -438,7 +539,8 @@ mod tests {
         );
     }
 
-    /// A connection outliving its runtime must not hold up that runtime's shutdown.
+    /// A connection outliving its runtime must not hold up that runtime's shutdown, which is why
+    /// the blocking work is one task per statement and never a parked loop.
     #[test]
     fn dropping_a_runtime_does_not_hang_on_a_live_connection() {
         let (done, is_done) = channel();
@@ -448,9 +550,9 @@ mod tests {
                 .enable_all()
                 .build()
                 .expect("runtime");
-            runtime.block_on(async {
-                let db: &'static AsyncSqlite = Box::leak(Box::new(in_memory()));
+            let db: &'static AsyncSqlite = Box::leak(Box::new(in_memory()));
 
+            runtime.block_on(async {
                 db.pluck(query("SELECT 1").expect("sql"))
                     .await
                     .expect("select");
